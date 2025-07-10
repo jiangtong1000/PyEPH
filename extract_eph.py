@@ -240,27 +240,31 @@ class PostQE2Pert():
 
 
 if __name__ == "__main__":
+    
+    def extract_hopping(post_qe2pert):
+        print("# DNTT System Parameters:")
+        print(f"# k-mesh: {post_qe2pert.kc_dim}")
+        print(f"# Number of Wannier functions: {post_qe2pert.num_wann}")
+        print(f"# Wannier centers:\n{post_qe2pert.wannier_center_cryst}")
+        print(f"# Lattice vectors:\n{post_qe2pert.at}")
+        print(f"# Lattice constant (Bohr): {post_qe2pert.alat}")
+            
+        rvec_set_cryst, ham_r_info = post_qe2pert.get_rvec_set()
+        print(f"# Number of R vectors: {len(rvec_set_cryst)}")
+        print(f"# Number of (ij) matrix elements (upper triangular, H_ij(R)): {len(ham_r_info)}")
+        print(f"# R vectors (crystal coordinates):")
+        for i, rvec in enumerate(rvec_set_cryst):
+            print(f"R{i+1:2d}: [{rvec[0]:6.0f}, {rvec[1]:6.0f}, {rvec[2]:6.0f}]")
+            
+        rvec_set_cart = post_qe2pert.cryst_to_cart(rvec_set_cryst)
+        print(f"# R vectors (Cartesian coordinates, bohr):")
+        for i, rvec in enumerate(rvec_set_cart):
+            print(f"R{i+1:2d}: [{rvec[0]:8.4f}, {rvec[1]:8.4f}, {rvec[2]:8.4f}]")
+            
+        print(f"# Matrix element information:")
+        for info in ham_r_info:
+            print(f"{info['hopping_key']}: {info['nr']} R vectors")
+    
     epr_file = "DNTT_epr.h5"
     post_qe2pert = PostQE2Pert(epr_file)
-    print("# DNTT System Parameters:")
-    print(f"# k-mesh: {post_qe2pert.kc_dim}")
-    print(f"# Number of Wannier functions: {post_qe2pert.num_wann}")
-    print(f"# Wannier centers:\n{post_qe2pert.wannier_center_cryst}")
-    print(f"# Lattice vectors:\n{post_qe2pert.at}")
-    print(f"# Lattice constant (Bohr): {post_qe2pert.alat}")
-        
-    rvec_set_cryst, ham_r_info = post_qe2pert.get_rvec_set()
-    print(f"# Number of R vectors: {len(rvec_set_cryst)}")
-    print(f"# Number of (ij) matrix elements (upper triangular, H_ij(R)): {len(ham_r_info)}")
-    print(f"# R vectors (crystal coordinates):")
-    for i, rvec in enumerate(rvec_set_cryst):
-        print(f"R{i+1:2d}: [{rvec[0]:6.0f}, {rvec[1]:6.0f}, {rvec[2]:6.0f}]")
-        
-    rvec_set_cart = post_qe2pert.cryst_to_cart(rvec_set_cryst)
-    print(f"# R vectors (Cartesian coordinates, bohr):")
-    for i, rvec in enumerate(rvec_set_cart):
-        print(f"R{i+1:2d}: [{rvec[0]:8.4f}, {rvec[1]:8.4f}, {rvec[2]:8.4f}]")
-        
-    print(f"# Matrix element information:")
-    for info in ham_r_info:
-        print(f"{info['hopping_key']}: {info['nr']} R vectors")
+    extract_hopping(post_qe2pert)
