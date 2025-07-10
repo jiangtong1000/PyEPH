@@ -207,37 +207,6 @@ class PostQE2Pert():
         """
         return np.array([self.at.T @ rvec for rvec in rvec_set])
 
-    def test_rvec_extraction(self):
-        """
-        Test the R vector extraction with DNTT data
-        """
-        print("DNTT System Parameters:")
-        print(f"k-mesh: {self.kc_dim}")
-        print(f"Number of Wannier functions: {self.num_wann}")
-        print(f"Wannier centers:\n{self.wannier_center_cryst}")
-        print(f"Lattice vectors:\n{self.at}")
-        print(f"Lattice constant: {self.alat}")
-        
-        # Get R vectors
-        rvec_set_cryst, ham_r_info = self.get_rvec_set()
-        
-        # Convert to Cartesian
-        rvec_set_cart = self.cryst_to_cart(rvec_set_cryst)
-        
-        print("\nR vectors (crystal coordinates):")
-        for i, rvec in enumerate(rvec_set_cryst):
-            print(f"R{i+1:2d}: [{rvec[0]:6.0f}, {rvec[1]:6.0f}, {rvec[2]:6.0f}]")
-        
-        print("\nR vectors (Cartesian coordinates, bohr):")
-        for i, rvec in enumerate(rvec_set_cart):
-            print(f"R{i+1:2d}: [{rvec[0]:8.4f}, {rvec[1]:8.4f}, {rvec[2]:8.4f}]")
-        
-        print("\nMatrix element information:")
-        for info in ham_r_info:
-            print(f"{info['matrix_element']}: {info['nr']} R vectors")
-        
-        return rvec_set_cryst, rvec_set_cart, ham_r_info
-
 
 if __name__ == "__main__":
     
