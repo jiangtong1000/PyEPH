@@ -90,7 +90,6 @@ class PostQE2Pert():
         nimag_per_grid = np.zeros(nr1*nr2*nr3, dtype=int)
         rvecs_list = []
         tot = 0
-        ir = 0
 
         for ir, (k, j, i) in enumerate(product(range(nr3), range(nr2), range(nr1))):
             base_vec = np.array([i, j, k])
@@ -107,8 +106,8 @@ class PostQE2Pert():
                             
             if nimg < 1:
                 raise ValueError('nim < 1 for grid point ({},{},{})'.format(i, j, k))
-            idx_accum_grid[ir-1] = tot
-            nimag_per_grid[ir-1] = nimg
+            idx_accum_grid[ir] = tot
+            nimag_per_grid[ir] = nimg
             tot += nimg
         
         rvecs = np.array(rvecs_list).reshape(tot, 3)
@@ -271,7 +270,7 @@ class PostQE2Pert():
     def extract_force_constants(self):
         """
         Extract real-space interatomic force constants (IFCs)
-        Following Perturbo's init_lattice_ifc and force_constant.f90
+        Following Perturbo's init_lattice_ifc from phonon_dispersion.f90, and force_constant.f90
         
         Returns:
         force_constants: dict containing:
@@ -282,26 +281,17 @@ class PostQE2Pert():
         """
         print("Extracting real-space interatomic force constants...")
         
-        # [1] Read atomic masses
-        with h5py.File(self.epr_file, 'r') as f:
-            mass = f['basic_data/mass'][:]  # (nat,) in atomic mass units
-        
-        # [2] Convert atomic positions to crystal coordinates
+        mass = self.mass
         atom_pos_cart = self.tau # (nat, 3)
         atom_pos_cryst = self.cryst_to_cart(atom_pos_cart, direction=-1) # (nat, 3)
-        
-        # [3] Generate phonon R-vector images
-        print("Generating phonon R-vector images...")
         rvec_ph_images = self.init_rvec_images(kdim=self.qc_dim)
-        print(f"Generated {len(rvec_ph_images['vec_cryst'])} phonon R-vector images")
         
-        # [4] Set up Wigner-Seitz cells for each atom pair (ia, ja)
-        print("Setting up Wigner-Seitz cells for force constants...")
+        # Set up Wigner-Seitz cells for each atom pair (ia, ja)
+        print("Setting up Wigner-Seitz cells for IFCs...")
         ifc_info = []
         ifc_data = {}
         all_ph_indices = set()
         
-        # Following Fortran: nelem = nat * (nat + 1) / 2 (upper triangular)
         m = 0
         for ja in range(self.nat):
             for ia in range(ja + 1):  # ia <= ja (upper triangular)
@@ -315,40 +305,22 @@ class PostQE2Pert():
                 )
                 all_ph_indices.update(ws_ph_indices)
                 
-                # Read force constants from HDF5
                 with h5py.File(self.epr_file, 'r') as f:
                     group = f['force_constants']
-                    
-                    # Dataset name following Perturbo convention
-                    dset_name = f"force_constant_{m}"
-                    
-                    if dset_name in group:
-                        ifc_matrix = group[dset_name][:]  # (3, 3, nr) complex
-                        
-                        # Store force constant data
-                        key = (ia, ja)
-                        ifc_data[key] = {
-                            'ifc_matrix': ifc_matrix,  # (3, 3, nr)
-                            'ws_ph_indices': ws_ph_indices,
-                            'ws_ph_degeneracy': ws_ph_degeneracy,
-                            'nrp': len(ws_ph_indices),
-                            'mass_factor': 1.0 / np.sqrt(mass[ia] * mass[ja])
-                        }
-                        
-                        # Store info
-                        ifc_info.append({
-                            'key': f'Φ_{ia+1}{ja+1}',
-                            'ia': ia, 'ja': ja,
-                            'nrp': len(ws_ph_indices),
-                            'shape': ifc_matrix.shape
-                        })
-                        
-                        print(f"  Φ_{ia+1}{ja+1}: {len(ws_ph_indices)} R-vectors, shape {ifc_matrix.shape}")
-                    else:
-                        print(f"  Warning: Force constant Φ_{ia+1}{ja+1} not found in HDF5")
+                    dset_name = f"ifc{m}"
+                    assert dset_name in group, f"Dataset {dset_name} not found in HDF5"
+                    ifc_matrix = group[dset_name][:]  # (nr, 3, 3) complex
+                    assert ifc_matrix.shape == (prod(self.qc_dim), 3, 3), f"ifc_matrix shape mismatch: {ifc_matrix.shape} != {(prod(self.qc_dim), 3, 3)}"
+                    key = (ia, ja)
+                    ifc_data[key] = {
+                        'ifc_matrix': ifc_matrix,  # (nr, 3, 3)
+                        'ws_ph_indices': ws_ph_indices,
+                        'ws_ph_degeneracy': ws_ph_degeneracy,
+                        'nrp': len(ws_ph_indices),
+                        'mass_factor': 1.0 / np.sqrt(mass[ia] * mass[ja])
+                    }
         
-        # [5] Collect unique phonon R-vectors
-        print("Collecting unique phonon R-vectors...")
+        # Collect unique phonon R-vectors
         unique_ph_indices = sorted(all_ph_indices)
         rvec_set_ph = rvec_ph_images['vec_cryst'][unique_ph_indices]
         
@@ -397,7 +369,7 @@ class PostQE2Pert():
         
         # [3] Build dynamical matrix
         for (ia, ja), data in ifc_data.items():
-            ifc_matrix = data['ifc_matrix']  # (3, 3, nr)
+            ifc_matrix = data['ifc_matrix']  # (nr, 3, 3)
             ws_ph_indices = data['ws_ph_indices']
             ws_ph_degeneracy = data['ws_ph_degeneracy']
             
@@ -409,7 +381,7 @@ class PostQE2Pert():
                 phase = rvec_to_phase[rvec_key]
                 
                 # Add contribution with proper degeneracy weighting
-                dmat_q += (phase / ws_ph_degeneracy[ir]) * ifc_matrix[:, :, ir]
+                dmat_q += (phase / ws_ph_degeneracy[ir]) * ifc_matrix[ir]
             
             # Mass normalization
             mass_factor = 1.0 / np.sqrt(mass[ia] * mass[ja])
@@ -573,61 +545,6 @@ class PostQE2Pert():
             'num_atoms': self.nat
         }
 
-    def structure_phonon_hamiltonian(self, force_constants, qpoints=None):
-        """
-        Structure phonon data to match Hamiltonian form: H_ph = Σ_λ ℏω_λ(q) a†_λ(q) a_λ(q)
-        
-        Args:
-            force_constants: output from extract_force_constants()
-            qpoints: array of q-points to compute modes (optional)
-            
-        Returns:
-            phonon_hamiltonian: structured phonon data for Hamiltonian
-        """
-        print("Structuring phonon data for Hamiltonian form...")
-        
-        # Default q-points if not provided
-        if qpoints is None:
-            # Create a default q-mesh for demonstration
-            nq = 8
-            qpoints = np.array([[i/nq, j/nq, k/nq] 
-                               for i in range(nq) 
-                               for j in range(nq) 
-                               for k in range(nq)])
-        
-        nmodes = 3 * self.nat
-        nq = len(qpoints)
-        
-        print(f"  Computing modes for {nq} q-points, {nmodes} modes each")
-        
-        # [1] Compute phonon modes for all q-points
-        phonon_frequencies = np.zeros((nq, nmodes))
-        phonon_modes = np.zeros((nq, nmodes, nmodes), dtype=complex)
-        
-        for iq, qpoint in enumerate(qpoints):
-            frequencies, modes = self.solve_phonon_modes(force_constants, qpoint)
-            phonon_frequencies[iq] = frequencies
-            phonon_modes[iq] = modes
-            
-            if (iq + 1) % (nq // 10 + 1) == 0:
-                print(f"    Progress: {iq + 1}/{nq}")
-        
-        # [2] Structure for Hamiltonian use
-        phonon_hamiltonian = {
-            'frequencies': phonon_frequencies,  # ω_λ(q) - (nq, nmodes)
-            'modes': phonon_modes,              # e_λ(q) - (nq, nmodes, nmodes)
-            'qpoints': qpoints,                 # q-points - (nq, 3)
-            'num_modes': nmodes,                # 3 * nat
-            'num_atoms': self.nat,
-            'atomic_masses': force_constants['mass'],
-            'force_constants': force_constants,  # Keep for reference
-            'hamiltonian_form': 'H_ph = Σ_λ ℏω_λ(q) a†_λ(q) a_λ(q)'
-        }
-        
-        print(f"  Phonon Hamiltonian ready: {nq} q-points, {nmodes} modes")
-        print(f"  Frequency range: {phonon_frequencies.min():.4f} to {phonon_frequencies.max():.4f}")
-        
-        return phonon_hamiltonian
 
     def couple_real_space_eph_to_phonon_modes(self, eph_real_space, phonon_hamiltonian, qpoint):
         """
@@ -713,88 +630,6 @@ class PostQE2Pert():
         
         return eph_phonon_coupled
 
-    def extract_complete_real_space_hamiltonian(self, test_qpoint=None):
-        """
-        Extract complete real-space electron-phonon Hamiltonian
-        
-        Returns all components:
-        1. H_el = Σ_{i,j,R} t_{ij}(R) c†_{i,R} c_{j,R'}  
-        2. H_ph = Σ_λ ℏω_λ(q) a†_λ(q) a_λ(q)
-        3. H_el-ph = Σ_{i,j,R,λ,q} g_{ij}^λ(R,q) c†_{i,R} c_{j,R'} [a†_λ(q) + a_λ(-q)]
-        
-        Args:
-            test_qpoint: q-point for demonstration (default: Gamma point)
-            
-        Returns:
-            complete_hamiltonian: all components in consistent real-space form
-        """
-        print("\n" + "="*70)
-        print("EXTRACTING COMPLETE REAL-SPACE ELECTRON-PHONON HAMILTONIAN")
-        print("="*70)
-        
-        if test_qpoint is None:
-            test_qpoint = np.array([0.1, 0.2, 0.0])  # Slightly off Gamma to avoid singularities
-        
-        # [1] Electronic part - already in real space
-        print("\n1. Electronic Hamiltonian H_el...")
-        rvec_set_el, ham_r_info = self.get_rvec_set()
-        
-        # [2] Extract raw electron-phonon coupling
-        print("\n2. Raw electron-phonon coupling...")
-        eph_data = self.extract_eph_in_real_space(ham_r_info)
-        
-        # [3] Transform to real-space electronic DOFs
-        print("\n3. Transform to real-space electronic DOFs...")
-        eph_real_space = self.transform_eph_to_real_space_electronic(eph_data, ham_r_info)
-        
-        # [4] Extract and structure phonon Hamiltonian
-        print("\n4. Phonon Hamiltonian H_ph...")
-        force_constants = self.extract_force_constants()
-        phonon_hamiltonian = self.structure_phonon_hamiltonian(force_constants)
-        
-        # [5] Couple to phonon modes
-        print("\n5. Final electron-phonon coupling H_el-ph...")
-        eph_final = self.couple_real_space_eph_to_phonon_modes(
-            eph_real_space, phonon_hamiltonian, test_qpoint
-        )
-        
-        # [6] Package everything
-        complete_hamiltonian = {
-            'electronic': {
-                'hopping_info': ham_r_info,
-                'rvectors': rvec_set_el,
-                'num_wannier': self.num_wann,
-                'hamiltonian_form': 'H_el = Σ_{i,j,R} t_{ij}(R) c†_{i,R} c_{j,R\'}'
-            },
-            'phononic': phonon_hamiltonian,
-            'electron_phonon': {
-                'coupling_data': eph_final,
-                'real_space_form': eph_real_space,
-                'test_qpoint': test_qpoint,
-                'hamiltonian_form': 'H_el-ph = Σ_{i,j,R,λ,q} g_{ij}^λ(R,q) c†_{i,R} c_{j,R\'} [a†_λ(q) + a_λ(-q)]'
-            },
-            'system_info': {
-                'num_wannier': self.num_wann,
-                'num_atoms': self.nat,
-                'lattice_vectors': self.at,
-                'atomic_positions': self.tau,
-                'k_mesh': self.kc_dim,
-                'q_mesh': self.qc_dim
-            }
-        }
-        
-        # [7] Summary
-        print("\n" + "="*70)
-        print("COMPLETE REAL-SPACE HAMILTONIAN SUMMARY")
-        print("="*70)
-        print(f"✓ Electronic: {len(ham_r_info)} hopping matrix elements")
-        print(f"✓ Phononic: {phonon_hamiltonian['num_modes']} modes at {len(phonon_hamiltonian['qpoints'])} q-points")
-        print(f"✓ Electron-phonon: {len(eph_final)} coupling matrix elements")
-        print(f"✓ All quantities in consistent real-space electronic representation")
-        print(f"✓ Ready for transport, spectroscopy, and many-body calculations")
-        
-        return complete_hamiltonian
-
     def compute_phonon_dispersion(self, qpath, force_constants):
         """
         Compute phonon dispersion along a q-path
@@ -823,63 +658,6 @@ class PostQE2Pert():
                 print(f"  Completed {iq + 1}/{nq} q-points")
         
         return frequencies, modes
-
-    def demonstrate_real_space_workflow(self, ham_r_info, eph_data, force_constants):
-        """
-        Demonstrate how to work with everything in real space
-        """
-        print("\n" + "="*60)
-        print("REAL-SPACE WORKFLOW DEMONSTRATION")
-        print("="*60)
-        
-        # Test q-point
-        qpoint = np.array([0.1, 0.2, 0.0])
-        
-        print(f"Working at q-point: {qpoint}")
-        
-        # [1] Electronic hopping - already in real space
-        print("\n1. Electronic hopping (already in real space):")
-        for key, info in ham_r_info.items():
-            if key == 'H_12':  # Just show one example
-                print(f"  {key}: {info['nr']} R-vectors")
-                print(f"    Hopping elements shape: {info['hopping_element'].shape}")
-                print(f"    First few elements: {info['hopping_element'][:3]}")
-                break
-        
-        # [2] Force constants - already in real space  
-        print("\n2. Force constants (already in real space):")
-        for info in force_constants['ifc_info'][:2]:  # Show first 2
-            print(f"  {info['key']}: {info['nrp']} R-vectors, shape {info['shape']}")
-        
-        # [3] Electron-phonon coupling - real space, atomic displacements
-        print("\n3. Electron-phonon coupling (real space, atomic displacements):")
-        example_key = list(eph_data.keys())[0]
-        example_data = eph_data[example_key]
-        print(f"  Example {example_key}: shape {example_data['ep_hop'].shape}")
-        print(f"    (3 displacement directions, nre electron R-vectors, nrp phonon R-vectors)")
-        
-        # [4] Transform to phonon modes
-        print("\n4. Transform to phonon modes:")
-        eph_phonon_modes = self.couple_eph_to_phonon_modes(eph_data, force_constants, qpoint)
-        
-        # [5] Show the result
-        print("\n5. Final result - electron-phonon coupling to phonon modes:")
-        example_key = list(eph_phonon_modes.keys())[0]
-        example_data = eph_phonon_modes[example_key]
-        print(f"  Example {example_key}:")
-        print(f"    Phonon mode coupling shape: {example_data['ep_phonon_modes'].shape}")
-        print(f"    (nmodes, nre electron R-vectors, nrp phonon R-vectors)")
-        print(f"    Phonon frequencies: {example_data['frequencies'][:6]}...")
-        
-        # [6] Summary
-        print("\n6. Summary - What you can do:")
-        print("  ✓ Electronic bands: Fourier transform H_ij(R) to get H_ij(k)")
-        print("  ✓ Phonon bands: Fourier transform Φ_ij(R) to get ω_μ(q)")
-        print("  ✓ Electron-phonon scattering: Use g_mn^μ(k,q) for transport calculations")
-        print("  ✓ All quantities available at any k-point and q-point")
-        print("  ✓ Consistent real-space representation for all interactions")
-        
-        return eph_phonon_modes
 
 
 if __name__ == "__main__":
@@ -928,52 +706,6 @@ if __name__ == "__main__":
         
         return eph_data
     
-    def extract_force_constants_main(post_qe2pert):
-        print("\n" + "="*60)
-        print("EXTRACTING REAL-SPACE FORCE CONSTANTS")
-        print("="*60)
-        
-        force_constants = post_qe2pert.extract_force_constants()
-        
-        print(f"\n# Force constant information:")
-        for info in force_constants['ifc_info']:
-            print(f"{info['key']}: {info['nrp']} R-vectors, shape {info['shape']}")
-        
-        print(f"\n# Atomic masses:")
-        for i, mass in enumerate(force_constants['mass']):
-            print(f"  Atom {i+1}: {mass:.6f} amu")
-        
-        return force_constants
-    
-    def test_phonon_dispersion(post_qe2pert, force_constants):
-        print("\n" + "="*60)
-        print("TESTING PHONON DISPERSION")
-        print("="*60)
-        
-        # Test at a few q-points
-        test_qpoints = np.array([
-            [0.0, 0.0, 0.0],  # Gamma point
-            [0.5, 0.0, 0.0],  # X point
-            [0.5, 0.5, 0.0],  # M point
-            [0.0, 0.0, 0.5],  # Z point
-        ])
-        
-        print(f"Testing phonon modes at {len(test_qpoints)} q-points...")
-        
-        for iq, qpoint in enumerate(test_qpoints):
-            frequencies, modes = post_qe2pert.solve_phonon_modes(force_constants, qpoint)
-            
-            print(f"\nQ-point {iq+1}: [{qpoint[0]:4.1f}, {qpoint[1]:4.1f}, {qpoint[2]:4.1f}]")
-            print(f"  Frequencies (first 6 modes): {frequencies[:6]}")
-            print(f"  Number of modes: {len(frequencies)}")
-            
-            # Check for negative frequencies (instabilities)
-            negative_modes = np.sum(frequencies < 0)
-            if negative_modes > 0:
-                print(f"  Warning: {negative_modes} negative frequencies (instabilities)")
-        
-        return test_qpoints, frequencies, modes
-    
     epr_file = "DNTT_epr.h5"
     post_qe2pert = PostQE2Pert(epr_file)
     
@@ -983,56 +715,3 @@ if __name__ == "__main__":
     # Extract electron-phonon matrix elements
     eph_data = extract_eph_realspace(post_qe2pert, ham_r_info)
     
-    # Extract force constants
-    force_constants = extract_force_constants_main(post_qe2pert)
-    
-    # Test phonon dispersion
-    test_qpoints, frequencies, modes = test_phonon_dispersion(post_qe2pert, force_constants)
-    
-    # Demonstrate real-space workflow
-    eph_phonon_modes = post_qe2pert.demonstrate_real_space_workflow(ham_r_info, eph_data, force_constants)
-    
-    # NEW: Extract complete real-space Hamiltonian
-    print("\n" + "="*70)
-    print("EXTRACTING COMPLETE REAL-SPACE HAMILTONIAN")
-    print("="*70)
-    
-    complete_hamiltonian = post_qe2pert.extract_complete_real_space_hamiltonian()
-    
-    # Demonstrate usage
-    print("\n" + "="*70)
-    print("USAGE EXAMPLES")
-    print("="*70)
-    
-    # [1] Electronic part
-    print("\n1. Electronic Hamiltonian:")
-    print("   Form: H_el = Σ_{i,j,R} t_{ij}(R) c†_{i,R} c_{j,R'}")
-    electronic = complete_hamiltonian['electronic']
-    print(f"   Available: {len(electronic['hopping_info'])} hopping matrix elements")
-    print(f"   R-vectors: {len(electronic['rvectors'])} electronic R-vectors")
-    
-    # [2] Phononic part  
-    print("\n2. Phononic Hamiltonian:")
-    print("   Form: H_ph = Σ_λ ℏω_λ(q) a†_λ(q) a_λ(q)")
-    phononic = complete_hamiltonian['phononic']
-    print(f"   Available: {phononic['num_modes']} modes at {len(phononic['qpoints'])} q-points")
-    print(f"   Frequency range: {phononic['frequencies'].min():.4f} to {phononic['frequencies'].max():.4f}")
-    
-    # [3] Electron-phonon part
-    print("\n3. Electron-Phonon Hamiltonian:")
-    print("   Form: H_el-ph = Σ_{i,j,R,λ,q} g_{ij}^λ(R,q) c†_{i,R} c_{j,R'} [a†_λ(q) + a_λ(-q)]")
-    eph = complete_hamiltonian['electron_phonon']
-    print(f"   Available: {len(eph['coupling_data'])} coupling matrix elements")
-    print(f"   Test q-point: {eph['test_qpoint']}")
-    
-    # [4] Summary
-    print("\n4. What you can do with this:")
-    print("   ✓ Electronic bands: Fourier transform t_{ij}(R) → t_{ij}(k)")
-    print("   ✓ Phonon bands: Already computed ω_λ(q) at all q-points")
-    print("   ✓ Electron-phonon scattering: g_{ij}^λ(R,q) for transport")
-    print("   ✓ Many-body calculations: All matrix elements in consistent form")
-    print("   ✓ Real-space analysis: Local interactions and chemistry")
-    
-    print("\n" + "="*70)
-    print("EXTRACTION COMPLETE!")
-    print("="*70)
