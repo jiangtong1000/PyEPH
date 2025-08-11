@@ -68,7 +68,7 @@ class PostQE2Pert():
             # Crystal to Cartesian: r_cart = at.T @ r_cryst
             return np.array([self.at.T @ pos for pos in positions])
         else:
-            # Cartesian to Crystal: r_cryst = bg.T @ r_cart TODO: verify this?
+            # Cartesian to Crystal: r_cryst = bg.T @ r_cart # bg.T here is inverse of at.T
             return np.array([self.bg.T @ pos for pos in positions])
 
     def init_rvec_images(self, kdim=None, ws_search_range=3):
@@ -231,16 +231,9 @@ class PostQE2Pert():
         """
         print("Extracting electron-phonon matrix elements...")
         
-        # [1] Convert atomic positions to crystal coordinates
-        atom_pos_cart = self.tau # (nat, 3)
-        atom_pos_cryst = self.cryst_to_cart(atom_pos_cart, direction=-1) # (nat, 3)
-        
-        # [2] Set up Wigner-Seitz cells for each (iw, jw, ia) combination
-        print("Setting up Wigner-Seitz cells for electron-phonon coupling...")
         eph_info = []
         matrix_elements = {}
         
-        # Following the Fortran triple loop: do ia = 1, nat; do jw = 1, nb; do iw = 1, nb
         for ia in range(self.nat):
             for jw in range(self.num_wann):
                 for iw in range(self.num_wann):
@@ -310,7 +303,7 @@ class PostQE2Pert():
                     dset_name = f"ifc{m}"
                     assert dset_name in group, f"Dataset {dset_name} not found in HDF5"
                     ifc_matrix = group[dset_name][:]  # (nr, 3, 3) complex
-                    assert ifc_matrix.shape == (prod(self.qc_dim), 3, 3), f"ifc_matrix shape mismatch: {ifc_matrix.shape} != {(prod(self.qc_dim), 3, 3)}"
+                    assert ifc_matrix.shape == (np.prod(self.qc_dim), 3, 3), f"ifc_matrix shape mismatch: {ifc_matrix.shape} != {(np.prod(self.qc_dim), 3, 3)}"
                     key = (ia, ja)
                     ifc_data[key] = {
                         'ifc_matrix': ifc_matrix,  # (nr, 3, 3)
@@ -423,6 +416,7 @@ class PostQE2Pert():
     def couple_eph_to_phonon_modes(self, eph_data, force_constants, qpoint):
         """
         Transform electron-phonon coupling from atomic displacements to phonon modes
+        Following the algorithm in notes.md
         
         Args:
             eph_data: output from extract_eph_in_real_space()
@@ -430,7 +424,7 @@ class PostQE2Pert():
             qpoint: q-point in crystal coordinates (3,)
             
         Returns:
-            eph_phonon_modes: electron-phonon coupling to phonon modes
+            eph_phonon_modes: electron-phonon coupling to phonon modes in mixed representation
         """
         print(f"Coupling electron-phonon matrix elements to phonon modes at q = {qpoint}")
         
@@ -438,197 +432,61 @@ class PostQE2Pert():
         frequencies, modes = self.solve_phonon_modes(force_constants, qpoint)
         nmodes = len(frequencies)
         
-        print(f"  Found {nmodes} phonon modes")
-        print(f"  Frequencies: {frequencies}")
+        print(f"  Found {nmodes} phonon modes, {frequencies}")
+
+        # Get phonon R-vectors for Fourier transform
+        rvec_set_ph = force_constants['rvec_set_ph']
+        nrp = len(rvec_set_ph)
         
-        # [2] Transform electron-phonon coupling
-        # g_mn^μ(k,q) = Σ_{ia,α} g_mn^{ia,α}(k,q) * e_μ^{ia,α}(q)
-        # where e_μ^{ia,α}(q) are the phonon eigenvectors (polarization vectors)
+        # Compute phase factors for Fourier transform: e^{iq·R_p}
+        phase_factors = np.exp(1j * 2 * np.pi * (rvec_set_ph @ qpoint))
+        print(f"  Computed phase factors for {nrp} phonon R-vectors")
         
         eph_phonon_modes = {}
         
         for (iw, jw, ia), data in eph_data.items():
-            ep_hop = data['ep_hop']  # (3, nre, nrp) - 3 displacement directions
+            ep_hop = data['ep_hop']  # (nrp, nre, 3) - Python/HDF5 convention
+            nrp_data, nre, _ = ep_hop.shape
             
-            # Transform to phonon mode coordinates
-            # For each phonon mode μ
-            ep_phonon_modes = np.zeros((nmodes, ep_hop.shape[1], ep_hop.shape[2]), dtype=complex)
+            # Step 2: Transform to phonon mode coordinates
+            # g_{ij}^{n}(R_e, R_p, q) = Σ_{α} g_{ij}^{α,a}(R_e, R_p) * u_{α,a}^{n}(q)
+            ep_phonon_modes_temp = np.zeros((nmodes, nre, nrp_data), dtype=complex)
             
             for mu in range(nmodes):
                 # Get polarization vector for this mode
                 e_mu = modes[:, mu]  # (3*nat,)
                 
-                # Transform: sum over displacement directions and atoms
+                # Transform: sum over displacement directions for this atom
                 for alpha in range(3):
                     mode_component = e_mu[ia * 3 + alpha]  # Polarization for atom ia, direction alpha
-                    ep_phonon_modes[mu] += mode_component * ep_hop[alpha]
+                    # ep_hop[:, :, alpha] has shape (nrp, nre)
+                    ep_phonon_modes_temp[mu] += mode_component * ep_hop[:, :, alpha].T  # Now (nre, nrp)
             
+            # Step 3: Fourier transform phononic part
+            # g_{ij}^{n}(R_e, q) = Σ_{R_p} g_{ij}^{n}(R_e, R_p, q) * e^{iq·R_p}
+            ep_final = np.zeros((nmodes, nre), dtype=complex)
+            
+            for mu in range(nmodes):
+                # Sum over phonon R-vectors: (nre, nrp) @ (nrp,) -> (nre,)
+                ep_final[mu] = ep_phonon_modes_temp[mu] @ phase_factors[:nrp_data]
+            
+            # Store final result: g_{ij}^n(R, R', q) where R=0, R'=R_e
             eph_phonon_modes[(iw, jw, ia)] = {
-                'ep_phonon_modes': ep_phonon_modes,  # (nmodes, nre electron R-vectors, nrp phonon R-vectors)
+                'coupling_matrix': ep_final,  # (nmodes, nre) - final mixed representation
                 'frequencies': frequencies,
                 'modes': modes,
-                'qpoint': qpoint
+                'qpoint': qpoint,
+                'shape_info': f'({nmodes} modes, {nre} R_e vectors)'
             }
+            
+            if (iw, jw, ia) == list(eph_data.keys())[0]:  # Print info for first element
+                print(f"  Transformed {(iw, jw, ia)}: {ep_hop.shape} -> {ep_final.shape}")
+                print(f"    Step 2: (nrp, nre, 3) -> (nmodes, nre, nrp)")  
+                print(f"    Step 3: (nmodes, nre, nrp) -> (nmodes, nre) via Fourier transform")
         
         print(f"  Transformed {len(eph_phonon_modes)} electron-phonon matrix elements")
         
         return eph_phonon_modes
-
-    def transform_eph_to_real_space_electronic(self, eph_data, ham_r_info):
-        """
-        Transform electron-phonon coupling to real-space electronic DOFs
-        
-        Current: g_{mn}^{ia,α}(k,q) - k-space electronic, atomic displacements
-        Target:  g_{ij}^{ia,α}(R,q) - real-space electronic, atomic displacements
-        
-        Args:
-            eph_data: output from extract_eph_in_real_space()
-            ham_r_info: electronic hopping information with R-vectors
-            
-        Returns:
-            eph_real_space: electron-phonon coupling in real-space electronic DOFs
-        """
-        print("Transforming electron-phonon coupling to real-space electronic DOFs...")
-        
-        # [1] Get electronic R-vectors from hopping data
-        all_el_rvecs = set()
-        for key, info in ham_r_info.items():
-            all_el_rvecs.update(info['rvec_indices'])
-        
-        # Get the actual R-vectors
-        rvec_images = self.init_rvec_images()
-        rvec_set_el = rvec_images['vec_cryst'][sorted(all_el_rvecs)]
-        
-        print(f"  Electronic R-vectors: {len(rvec_set_el)}")
-        
-        # [2] Transform electron-phonon coupling
-        # Structure: g_{ij}^{ia,α}(R_el, R_ph) for each atom ia and displacement α
-        
-        eph_real_space = {}
-        
-        for (iw, jw, ia), data in eph_data.items():
-            ep_hop = data['ep_hop']  # (3, nre, nrp) - 3 for displacement directions
-            
-            # The current ep_hop is already in real space for phonons (R_ph)
-            # and corresponds to Wannier orbitals iw, jw
-            # We need to identify which R-vectors correspond to this orbital pair
-            
-            # Find the hopping info for this orbital pair
-            from_key = min(iw, jw)
-            to_key = max(iw, jw)
-            hop_key = f'H_{from_key+1}{to_key+1}'
-            
-            if hop_key in ham_r_info:
-                hop_info = ham_r_info[hop_key]
-                el_rvec_indices = hop_info['rvec_indices']
-                el_rvectors = rvec_images['vec_cryst'][el_rvec_indices]
-                
-                # Store in the real-space format
-                # g_{ij}^{ia,α}(R_el, R_ph) where R_el and R_ph are explicit
-                eph_real_space[(iw, jw, ia)] = {
-                    'coupling_matrix': ep_hop,  # (3, nre, nrp) - α, R_el, R_ph
-                    'electronic_rvectors': el_rvectors,  # (nre, 3) - R_el vectors
-                    'electronic_rvec_indices': el_rvec_indices,  # indices in full R-vector set
-                    'wannier_orbitals': (iw, jw),
-                    'atom_index': ia,
-                    'shape_info': f'({ep_hop.shape[0]} displacements, {ep_hop.shape[1]} R_el, {ep_hop.shape[2]} R_ph)'
-                }
-                
-                print(f"  {(iw, jw, ia)}: {eph_real_space[(iw, jw, ia)]['shape_info']}")
-        
-        print(f"  Total matrix elements: {len(eph_real_space)}")
-        
-        return {
-            'eph_coupling': eph_real_space,
-            'electronic_rvectors': rvec_set_el,
-            'num_wannier': self.num_wann,
-            'num_atoms': self.nat
-        }
-
-
-    def couple_real_space_eph_to_phonon_modes(self, eph_real_space, phonon_hamiltonian, qpoint):
-        """
-        Transform real-space electron-phonon coupling to phonon modes
-        
-        Target form: g_{ij}^λ(R_el, q) = Σ_{ia,α} g_{ij}^{ia,α}(R_el, R_ph) e^{iq·R_ph} e_λ^{ia,α}(q)
-        
-        Args:
-            eph_real_space: output from transform_eph_to_real_space_electronic()
-            phonon_hamiltonian: output from structure_phonon_hamiltonian()
-            qpoint: specific q-point to transform to
-            
-        Returns:
-            eph_phonon_coupled: electron-phonon coupling in final Hamiltonian form
-        """
-        print(f"Coupling real-space electron-phonon to phonon modes at q = {qpoint}")
-        
-        # [1] Find q-point in phonon data
-        qpoints = phonon_hamiltonian['qpoints']
-        q_index = None
-        for iq, q in enumerate(qpoints):
-            if np.allclose(q, qpoint, atol=1e-6):
-                q_index = iq
-                break
-        
-        if q_index is None:
-            # Compute modes for this specific q-point
-            frequencies, modes = self.solve_phonon_modes(
-                phonon_hamiltonian['force_constants'], qpoint
-            )
-            print(f"  Computed modes for new q-point")
-        else:
-            frequencies = phonon_hamiltonian['frequencies'][q_index]
-            modes = phonon_hamiltonian['modes'][q_index]
-            print(f"  Using precomputed modes from q-index {q_index}")
-        
-        nmodes = len(frequencies)
-        
-        # [2] Transform electron-phonon coupling
-        eph_phonon_coupled = {}
-        
-        for (iw, jw, ia), data in eph_real_space['eph_coupling'].items():
-            coupling_matrix = data['coupling_matrix']  # (3, nre, nrp)
-            el_rvectors = data['electronic_rvectors']    # (nre, 3)
-            
-            # Get phonon R-vectors from force constants
-            # This is a bit complex - we need to map back to phonon R-vectors
-            # For now, assume we have them (should be passed or computed)
-            
-            # Transform: g_{ij}^λ(R_el, q) = Σ_{ia,α} g_{ij}^{ia,α}(R_el, R_ph) e^{iq·R_ph} e_λ^{ia,α}(q)
-            nre = coupling_matrix.shape[1]  # number of electronic R-vectors
-            
-            # Result: g_{ij}^λ(R_el, q) for each mode λ and electronic R-vector
-            g_phonon_modes = np.zeros((nmodes, nre), dtype=complex)
-            
-            for mu in range(nmodes):
-                # Get polarization vector for this mode and atom
-                e_mu = modes[:, mu]  # (3*nat,)
-                
-                # Sum over displacement directions α
-                for alpha in range(3):
-                    mode_component = e_mu[ia * 3 + alpha]
-                    
-                    # Sum over phonon R-vectors (Fourier transform)
-                    # This is simplified - in full implementation, need proper R_ph handling
-                    for ire in range(nre):
-                        # For now, take the on-site contribution (R_ph = 0)
-                        # In full implementation, sum over all R_ph with phase factors
-                        g_phonon_modes[mu, ire] += mode_component * coupling_matrix[alpha, ire, 0]
-            
-            eph_phonon_coupled[(iw, jw, ia)] = {
-                'coupling_to_modes': g_phonon_modes,  # (nmodes, nre) - λ, R_el
-                'electronic_rvectors': el_rvectors,   # (nre, 3)
-                'phonon_frequencies': frequencies,    # (nmodes,)
-                'phonon_modes': modes,                # (3*nat, nmodes)
-                'qpoint': qpoint,
-                'wannier_orbitals': (iw, jw),
-                'atom_index': ia,
-                'hamiltonian_form': 'g_{ij}^λ(R_el, q) for H_el-ph'
-            }
-        
-        print(f"  Transformed {len(eph_phonon_coupled)} coupling matrix elements")
-        
-        return eph_phonon_coupled
 
     def compute_phonon_dispersion(self, qpath, force_constants):
         """
@@ -686,32 +544,3 @@ if __name__ == "__main__":
         for key, info in ham_r_info.items():
             print(f"{info['key']}: {info['nr']} R vectors")
         return ham_r_info
-    
-    def extract_eph_realspace(post_qe2pert, ham_r_info):
-        print("\n" + "="*60)
-        print("EXTRACTING ELECTRON-PHONON MATRIX ELEMENTS")
-        print("="*60)
-        
-        eph_data = post_qe2pert.extract_eph_in_real_space(ham_r_info)
-        
-        print(f"\n# System Parameters:")
-        print(f"# k-mesh: {post_qe2pert.kc_dim}")
-        print(f"# q-mesh: {post_qe2pert.qc_dim}")
-        print(f"# Number of Wannier functions: {post_qe2pert.num_wann}")
-        print(f"# Number of atoms: {post_qe2pert.nat}")
-        
-        print(f"\n# Matrix element information:")
-        for key, info in eph_data.items():
-            print(f"{key}: {info['ep_hop'].shape}")
-        
-        return eph_data
-    
-    epr_file = "DNTT_epr.h5"
-    post_qe2pert = PostQE2Pert(epr_file)
-    
-    # Extract electronic hopping
-    ham_r_info = extract_hopping(post_qe2pert)
-    
-    # Extract electron-phonon matrix elements
-    eph_data = extract_eph_realspace(post_qe2pert, ham_r_info)
-    
