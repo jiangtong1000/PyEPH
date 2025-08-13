@@ -300,20 +300,20 @@ class PostQE2Pert():
         all_ph_indices = set()
         
         m = 0
-        for ja in range(self.nat):
-            for ia in range(ja + 1):  # ia <= ja (upper triangular)
-                m += 1
+        with h5py.File(self.epr_file, 'r') as f:
+            group = f['force_constant']
+            for ja in range(self.nat):
+                for ia in range(ja + 1):  # ia <= ja (upper triangular)
+                    m += 1
+                    
+                    # Phonon WS cell: connecting cryst_tau(ia) to cryst_tau(ja)
+                    ws_ph_indices, ws_ph_degeneracy = self.set_wigner_seitz_cell(
+                        rvec_ph_images,
+                        atom_pos_cryst[ia],
+                        atom_pos_cryst[ja]
+                    )
+                    all_ph_indices.update(ws_ph_indices)
                 
-                # Phonon WS cell: connecting cryst_tau(ia) to cryst_tau(ja)
-                ws_ph_indices, ws_ph_degeneracy = self.set_wigner_seitz_cell(
-                    rvec_ph_images,
-                    atom_pos_cryst[ia],
-                    atom_pos_cryst[ja]
-                )
-                all_ph_indices.update(ws_ph_indices)
-                
-                with h5py.File(self.epr_file, 'r') as f:
-                    group = f['force_constant']
                     dset_name = f"ifc{m}"
                     assert dset_name in group, f"Dataset {dset_name} not found in HDF5"
                     ifc_matrix = group[dset_name][:]  # (nr, 3, 3) complex
@@ -375,7 +375,7 @@ class PostQE2Pert():
         
         nmodes = 3 * self.nat
         
-        # [1] Compute phase factors e^(iq·R)
+        # [1] Compute phase factors e^(iqR), q (3, ), R (nrp, 3)
         phase_factors = np.exp(1j * 2 * np.pi * (rvec_set_ph @ qpoint))
         
         # [2] Fourier transform force constants to q-space
@@ -401,8 +401,8 @@ class PostQE2Pert():
                 rvec_key = tuple(rvec.astype(int))
                 phase = rvec_to_phase[rvec_key]
                 
-                # Add contribution - degeneracy weighting already included in ifc_matrix
-                # Following Fortran comment: "the 1/ws%ndeg(ir) is already included in ifc(:)"
+                # Add contribution with explicit degeneracy weighting
+                # Check if degeneracy needs to be applied manually
                 dmat_q += phase * ifc_matrix[ir]
             
             # Mass normalization
@@ -475,7 +475,7 @@ class PostQE2Pert():
         rvec_set_ph = force_constants['rvec_set_ph']
         nrp = len(rvec_set_ph)
         
-        # Compute phase factors for Fourier transform: e^{iq·R_p}
+        # Compute phase factors for Fourier transform: e^{iqR}, q (3, ), R (nrp, 3)
         phase_factors = np.exp(1j * 2 * np.pi * (rvec_set_ph @ qpoint))
         print(f"  Computed phase factors for {nrp} phonon R-vectors")
         
@@ -553,31 +553,3 @@ class PostQE2Pert():
                 print(f"  Completed {iq + 1}/{nq} q-points")
         
         return frequencies, modes
-
-
-if __name__ == "__main__":
-    
-    def extract_hopping(post_qe2pert):
-        print("# DNTT System Parameters:")
-        print(f"# k-mesh: {post_qe2pert.kc_dim}")
-        print(f"# Number of Wannier functions: {post_qe2pert.num_wann}")
-        print(f"# Wannier centers:\n{post_qe2pert.wannier_center_cryst}")
-        print(f"# Lattice vectors:\n{post_qe2pert.at}")
-        print(f"# Lattice constant (Bohr): {post_qe2pert.alat}")
-            
-        rvec_set_cryst, ham_r_info = post_qe2pert.get_rvec_set()
-        print(f"# Number of R vectors: {len(rvec_set_cryst)}")
-        print(f"# Number of (ij) matrix elements (upper triangular, H_ij(R)): {len(ham_r_info)}")
-        print(f"# R vectors (crystal coordinates):")
-        for i, rvec in enumerate(rvec_set_cryst):
-            print(f"R{i+1:2d}: [{rvec[0]:6.0f}, {rvec[1]:6.0f}, {rvec[2]:6.0f}]")
-        
-        rvec_set_cart = post_qe2pert.cryst_to_cart(rvec_set_cryst)
-        print(f"# R vectors (Cartesian coordinates, bohr):")
-        for i, rvec in enumerate(rvec_set_cart):
-            print(f"R{i+1:2d}: [{rvec[0]:8.4f}, {rvec[1]:8.4f}, {rvec[2]:8.4f}]")
-            
-        print(f"# Matrix element information:")
-        for key, info in ham_r_info.items():
-            print(f"{info['key']}: {info['nr']} R vectors")
-        return ham_r_info
