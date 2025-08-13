@@ -58,18 +58,20 @@ class PostQE2Pert():
             self.mass = f['basic_data/mass'][:]  # real, (nat,) atomic masses in atomic unit
             assert self.wannier_center_cryst.shape == (self.num_wann, 3), f"wannier_center_cryst shape mismatch: {self.wannier_center_cryst.shape} != ({self.num_wann}, 3)"
 
-    def cryst_to_cart(self, positions, direction=1):
+    def convert_coordinates(self, positions, direction='crys_to_cart'):
         """
         Convert between crystal and Cartesian coordinates
         positions: array of positions (nvec or nat, 3)
-        direction: 1 for cryst->cart, -1 for cart->cryst
+        direction: 'crys_to_cart' or 'cart_to_crys'
         """
-        if direction == 1:
+        if direction == 'crys_to_cart':
             # Crystal to Cartesian: r_cart = at.T @ r_cryst
             return np.array([self.at.T @ pos for pos in positions])
-        else:
+        elif direction == 'cart_to_crys':
             # Cartesian to Crystal: r_cryst = bg.T @ r_cart # bg.T here is inverse of at.T
             return np.array([self.bg.T @ pos for pos in positions])
+        else:
+            raise ValueError(f"Invalid direction: {direction}")
 
     def init_rvec_images(self, kdim=None, ws_search_range=3):
         """
@@ -280,85 +282,65 @@ class PostQE2Pert():
         return matrix_elements
 
     def extract_force_constants(self):
-        """
-        Extract real-space interatomic force constants (IFCs)
-        Following Perturbo's init_lattice_ifc from phonon_dispersion.f90, and force_constant.f90
-        
-        Returns:
-        force_constants: dict containing:
-            - 'ifc_data': real-space force constants Φ_ij(R)
-            - 'rvec_set_ph': phonon R-vectors
-            - 'mass': atomic masses
-            - 'ifc_info': information about each force constant matrix
-        """
         print("Extracting real-space interatomic force constants...")
         
         mass = self.mass
         atom_pos_cart = self.tau # (nat, 3)
-        atom_pos_cryst = self.cryst_to_cart(atom_pos_cart, direction=-1) # (nat, 3)
+        atom_pos_cryst = self.convert_coordinates(atom_pos_cart, direction='cart_to_crys') # (nat, 3)
         rvec_ph_images = self.init_rvec_images(kdim=self.qc_dim)
         
-        # Set up Wigner-Seitz cells for each atom pair (ia, ja)
+        # 1. Compute all WS cells
         print("Setting up Wigner-Seitz cells for IFCs...")
-        ifc_info = []
-        ifc_data = {}
+        ws_cells = {}
         all_ph_indices = set()
         
+        for ja in range(self.nat):
+            for ia in range(ja + 1):
+                ws_ph_indices, ws_ph_degeneracy = self.set_wigner_seitz_cell(
+                    self.qc_dim, rvec_ph_images, atom_pos_cryst[ia], atom_pos_cryst[ja]
+                )
+                ws_cells[(ia, ja)] = (ws_ph_indices, ws_ph_degeneracy)
+                all_ph_indices.update(ws_ph_indices)  # Original indices only
+
+        # Create compact R-vector set and remapping (for memory efficiency)
+        unique_ph_indices = sorted(all_ph_indices)
+        rvec_set_ph = rvec_ph_images['vec_cryst'][unique_ph_indices]
+        index_mapping = {orig_idx: new_idx for new_idx, orig_idx in enumerate(unique_ph_indices)}
+
+        # Update WS indices to compact indices
+        for key in ws_cells:
+            old_indices, degeneracy = ws_cells[key]
+            new_indices = np.array([index_mapping[idx] for idx in old_indices])
+            ws_cells[key] = (new_indices, degeneracy)
+
+        # Read IFC data
         m = 0
+        ifc_data = {}
         with h5py.File(self.epr_file, 'r') as f:
             group = f['force_constant']
             for ja in range(self.nat):
-                for ia in range(ja + 1):  # ia <= ja (upper triangular)
+                for ia in range(ja + 1):
                     m += 1
-                    
-                    # Phonon WS cell: connecting cryst_tau(ia) to cryst_tau(ja)
-                    ws_ph_indices, ws_ph_degeneracy = self.set_wigner_seitz_cell(
-                        self.qc_dim,
-                        rvec_ph_images,
-                        atom_pos_cryst[ia],
-                        atom_pos_cryst[ja]
-                    )
-                    all_ph_indices.update(ws_ph_indices)
-                
+                    ws_ph_indices, ws_ph_degeneracy = ws_cells[(ia, ja)]  # Already remapped
+                    nr = len(ws_ph_indices)
+
                     dset_name = f"ifc{m}"
-                    assert dset_name in group, f"Dataset {dset_name} not found in HDF5"
-                    ifc_matrix = group[dset_name][:]  # (nr, 3, 3) complex
-                    # assert ifc_matrix.shape == (np.prod(self.qc_dim), 3, 3), f"ifc_matrix shape mismatch: {ifc_matrix.shape} != {(np.prod(self.qc_dim), 3, 3)}"
-                    key = (ia, ja)
-                    ifc_data[key] = {
-                        'ifc_matrix': ifc_matrix,  # (nr, 3, 3)
-                        'ws_ph_indices': ws_ph_indices,
+                    ifc_matrix = group[dset_name][:]
+                    assert ifc_matrix.shape == (nr, 3, 3), f"ifc_matrix shape mismatch: {ifc_matrix.shape} != ({nr}, 3, 3)"
+                
+                    ifc_data[(ia, ja)] = {
+                        'ifc_matrix': ifc_matrix,
+                        'ws_ph_indices': ws_ph_indices,  # Compact indices
                         'ws_ph_degeneracy': ws_ph_degeneracy,
                         'nrp': len(ws_ph_indices),
                         'mass_factor': 1.0 / np.sqrt(mass[ia] * mass[ja])
                     }
-        
-        # Collect unique phonon R-vectors and create remapping
-        unique_ph_indices = sorted(all_ph_indices)
-        rvec_set_ph = rvec_ph_images['vec_cryst'][unique_ph_indices]
-        
-        # Create mapping from original indices to compact indices
-        # Following Fortran's setup_rvec_set_ph logic
-        index_mapping = {}
-        for new_idx, orig_idx in enumerate(unique_ph_indices):
-            index_mapping[orig_idx] = new_idx
-        
-        # Update WS cell indices to point into compact rvec_set_ph
-        # This is crucial - matches Fortran line 141: ptr%ws_ph%rvec(ir) = rvec_label(irp)
-        for key, data in ifc_data.items():
-            old_ws_indices = data['ws_ph_indices']
-            new_ws_indices = np.array([index_mapping[idx] for idx in old_ws_indices])
-            data['ws_ph_indices'] = new_ws_indices
-        
-        print(f"Final result: {len(rvec_set_ph)} unique phonon R-vectors")
-        print(f"Total force constant matrices: {len(ifc_data)}")
-        print(f"Updated WS cell indices to point into compact rvec_set_ph")
-        
+
         return {
             'ifc_data': ifc_data,
             'rvec_set_ph': rvec_set_ph,
             'mass': mass,
-            'ifc_info': ifc_info,
+            'ifc_info': [],
             'atom_pos_cryst': atom_pos_cryst
         }
 
@@ -384,32 +366,22 @@ class PostQE2Pert():
         # [1] Compute phase factors e^(iqR), q (3, ), R (nrp, 3)
         phase_factors = np.exp(1j * 2 * np.pi * (rvec_set_ph @ qpoint))
         
-        # [2] Fourier transform force constants to q-space
-        # Create mapping from R-vector indices to phase factors
-        rvec_to_phase = {}
-        for i, rvec in enumerate(rvec_set_ph):
-            rvec_key = tuple(rvec.astype(int))
-            rvec_to_phase[rvec_key] = phase_factors[i]
-        
         # Initialize dynamical matrix
         dyn_matrix = np.zeros((nmodes, nmodes), dtype=complex)
         
         # [3] Build dynamical matrix
         for (ia, ja), data in ifc_data.items():
+            if ia > ja:
+                continue
             ifc_matrix = data['ifc_matrix']  # (nr, 3, 3)
             ws_ph_indices = data['ws_ph_indices']
-            ws_ph_degeneracy = data['ws_ph_degeneracy']
             
             # Fourier transform this force constant
             dmat_q = np.zeros((3, 3), dtype=complex)
             for ir, rvec_idx in enumerate(ws_ph_indices):
                 rvec = rvec_set_ph[rvec_idx]
-                rvec_key = tuple(rvec.astype(int))
-                phase = rvec_to_phase[rvec_key]
-                
-                # Add contribution with explicit degeneracy weighting
-                # Check if degeneracy needs to be applied manually
-                dmat_q += phase * ifc_matrix[ir]
+                phase = phase_factors[rvec_idx]
+                dmat_q += phase * ifc_matrix[ir] # no degeneracy weighting needed!
             
             # Mass normalization
             mass_factor = 1.0 / np.sqrt(mass[ia] * mass[ja])
@@ -435,6 +407,7 @@ class PostQE2Pert():
                             # Off-diagonal elements within diagonal block
                             dyn_matrix[ii, jj] = (dmat_q[i, j] + np.conj(dmat_q[j, i])) * 0.5
                             dyn_matrix[jj, ii] = np.conj(dyn_matrix[ii, jj])
+                            # dyn_matrix[jj, ii] = np.conj(dmat_q[i, j])
         
         # [5] Diagonalize
         eigenvalues, eigenvectors = np.linalg.eigh(dyn_matrix)
