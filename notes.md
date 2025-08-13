@@ -104,3 +104,6 @@ The result gives the desired form:
 $$
 g_{ij}^n(R, R', \mathbf{q}) = g_{ij}^{n}(R_e, \mathbf{q}) \quad \text{where } R = 0, R' = R_e
 $$
+
+## Physics behind the coding
+`set_cutoff_small` is the cutoff radius in real space for Wigner-Seitz cell vector search (the edge of the first Brillouin zone in reciprocal space), because the Wannier functions are localized in real space, the hopping integrals decay rapidly with the distance, we only need R-vectors within a certain cutoff radius to capture the essential physics. This is done by enumerating the 8 corners of a box in crystal coordinates, and find the maximum distance from the origin (Gamma point) to the corners.

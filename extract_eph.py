@@ -6,23 +6,23 @@ from itertools import product
 
 
 def get_length(r_cryst, at):
-    """
-    Calculate length of a crystal vector in Cartesian coordinates
-    r_cryst: R vector in crystal coordinates (3,)
-    at: lattice vectors (3,3)
-        the i-th row of at is the i-th lattice vector
-        the column is the x, y, z components of the lattice vector
-    """
-    r_cart = at.T @ r_cryst
-    return np.linalg.norm(r_cart)
+    r_cryst = np.asarray(r_cryst, dtype=float)
+    at = np.asarray(at, dtype=float)
+    r_cart = r_cryst @ at
+    return np.sqrt(np.einsum('...i,...i->...', r_cart, r_cart))
+
 
 def set_cutoff_small(rdim, at):
     """
-    Cutoff distance for Wigner-Seitz cell vector search
+    Retrun the cutoff radius in real space for Wigner-Seitz cell vector search
+    (the edge of the first Brillouin zone in reciprocal space)
+    Define a sphere in real space containing all R-vectors within approx half of the Brillouin zone
+    This ensures we capture all relevant R-vectors for Wannier hopping while avoiding unnecessary computations
+    for R-vectors far away from the Brillouin zone.
     rdim: k-mesh dimensions [nk1, nk2, nk3]
     at: lattice vectors (3,3)
     """
-    ndim = np.array(rdim) // 2 + 1
+    ndim = np.array(rdim) // 2 + 1 # half width of the k-mesh plus 1
     cutoff = 0.0
     
     for i, j, k in product([-1, 1], repeat=3): # corner points of the k-mesh
@@ -48,7 +48,7 @@ class PostQE2Pert():
         with h5py.File(self.epr_file, 'r') as f:
             self.at = f['basic_data/at'][:]
             self.alat = f['basic_data/alat'][()]
-            self.kc_dim = f['basic_data/kc_dim'][:]
+            self.kc_dim = f['basic_data/kc_dim'][:] # number of kc points in each direction
             self.qc_dim = f['basic_data/qc_dim'][:]
             self.num_wann = f['basic_data/num_wann'][()]
             self.nat = f['basic_data/nat'][()]
@@ -97,6 +97,8 @@ class PostQE2Pert():
             # Pre-filtering before computing actual hopping distance
             for (mi, mj, mk) in product(range(-ws_search_range, ws_search_range+1), repeat=3):
                 # supercell translations of base_vec, all physically equivalent positions due to PBC
+                # images are lattice vectors in supercell, just physical copies of base_vec 
+                # base_vec is the primitive index of the supercell
                 rvec = np.array([mi, mj, mk]) * ws_dim + base_vec
                 if get_length(rvec, self.at) < cutoff:
                     # a point distance from origin will also not contribute to any hopping
@@ -111,9 +113,13 @@ class PostQE2Pert():
             tot += nimg
         
         rvecs = np.array(rvecs_list).reshape(tot, 3)
-        return {'idx_accum_grid': idx_accum_grid, 'nimag_per_grid': nimag_per_grid, 'vec_cryst': rvecs}
+        return {
+            'idx_accum_grid': idx_accum_grid, # (nr1*nr2*nr3,)
+            'nimag_per_grid': nimag_per_grid, # (nr1*nr2*nr3,)
+            'vec_cryst': rvecs # (tot, 3)
+            }
 
-    def set_wigner_seitz_cell(self, rvec_images, tau_a, tau_b, eps=1e-6):
+    def set_wigner_seitz_cell(self, kdim, rvec_images, tau_a, tau_b, eps=1e-6):
         """
         Find R vectors for Wigner-Seitz cell connecting tau_a (origin) and tau_b (lattice vector R)
         
@@ -128,37 +134,35 @@ class PostQE2Pert():
         vec_cryst = rvec_images['vec_cryst']
         idx = rvec_images['idx_accum_grid']
         nim = rvec_images['nimag_per_grid']
-        tot_r = self.kc_dim[0] * self.kc_dim[1] * self.kc_dim[2]
-        # the no. potential rvecs, nvec >> the total number of grid points, tot_r
-        # only a tiny subset connects two wannier centers
-        nvec = vec_cryst.shape[0]
-
-        itmp = np.zeros(nvec, dtype=int)
-        ndeg = np.zeros(tot_r, dtype=int)
-
-        # For each grid point
+        
+        tot_r = int(np.prod(kdim))
+        nvec  = vec_cryst.shape[0]
+        itmp = np.zeros(nvec, dtype=int) # per-image degeneracy (0 if not selected)
+        
+        dtau = (tau_b - tau_a)
+    
         for ir in range(tot_r):
-            idx0 = idx[ir]
-            nimg = nim[ir]
-            dist = np.zeros(nimg)
-            # loop over possible rvecs at this grid point
-            for n in range(nimg):
-                vec_b = vec_cryst[idx0 + n] + tau_b
-                dist[n] = get_length(vec_b - tau_a, self.at)
-            # Find rvecs with minimal distances (degenerate)
-            dist -= dist.min()
-            ndeg[ir] = np.count_nonzero(dist < eps)
-            # Mark equivalences in itmp
-            for n in range(nimg):
-                if dist[n] < eps:
-                    itmp[idx0 + n] = ndeg[ir]
+            start = idx[ir]
+            nimg  = nim[ir]
+            stop  = start + nimg
 
-        if np.any(ndeg < 1):
-            raise ValueError("ndeg < 1 found in set_wigner_seitz_cell")
+            # Block of candidate R (crystal coords), shift by tau_b - tau_a
+            R_block_cryst = vec_cryst[start:stop] + dtau  # (nimg, 3)
+            dist = get_length(R_block_cryst, self.at)  # (nimg,)
 
-        ws_indices = np.flatnonzero(itmp > 0)
+            # Find degenerate images with minimal distance
+            dmin = dist.min()
+            sel  = np.isclose(dist, dmin, atol=eps, rtol=0) # (nimg,)
+
+            g    = int(sel.sum())
+            if g < 1:
+                raise ValueError(f"ndeg < 1 at grid point {ir}")
+
+            # Write degeneracy for selected images in this block with mask sel
+            itmp[start:stop][sel] = g
+
+        ws_indices    = np.flatnonzero(itmp)
         ws_degeneracy = itmp[ws_indices]
-
         return ws_indices, ws_degeneracy
 
     def get_rvec_set(self):
@@ -184,6 +188,7 @@ class PostQE2Pert():
         for jb in range(self.num_wann):
             for ib in range(jb + 1):
                 ws_indices, ws_degeneracy = self.set_wigner_seitz_cell(
+                    self.kc_dim,
                     rvec_images,
                     self.wannier_center_cryst[ib], 
                     self.wannier_center_cryst[jb]
@@ -308,6 +313,7 @@ class PostQE2Pert():
                     
                     # Phonon WS cell: connecting cryst_tau(ia) to cryst_tau(ja)
                     ws_ph_indices, ws_ph_degeneracy = self.set_wigner_seitz_cell(
+                        self.qc_dim,
                         rvec_ph_images,
                         atom_pos_cryst[ia],
                         atom_pos_cryst[ja]
