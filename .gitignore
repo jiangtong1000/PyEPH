@@ -2,3 +2,5 @@
 *.h5
 wflow.md
 __pycache__/
+
+notes/

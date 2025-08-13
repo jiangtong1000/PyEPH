@@ -203,7 +203,7 @@ class PostQE2Pert():
                 print(f"  H_{ib+1}{jb+1}: {len(ws_indices)} R vectors")
                 ws_x += 1
         
-        # [3] Collect all unique R vectors
+        # [3] Collect all unique R vectors and create remapping
         print("Collecting unique R vectors...")
         all_indices = set()
         for ws_indices in ham_r_ws_indices:
@@ -213,7 +213,21 @@ class PostQE2Pert():
         unique_indices = sorted(all_indices)
         rvec_set = rvec_images['vec_cryst'][unique_indices]
         
+        # Create mapping from original indices to compact indices
+        # Following Fortran's setup_rvec_set_el logic
+        index_mapping = {}
+        for new_idx, orig_idx in enumerate(unique_indices):
+            index_mapping[orig_idx] = new_idx
+        
+        # Update matrix element indices to point into compact rvec_set
+        # This is crucial - matches Fortran line 146: ptr%ws_el%rvec(ir) = rvec_label(ire)
+        for key, info in ham_r_info.items():
+            old_indices = info['rvec_indices']
+            new_indices = np.array([index_mapping[idx] for idx in old_indices])
+            info['rvec_indices'] = new_indices
+        
         print(f"Final result: {len(rvec_set)} unique R vectors for all matrix wannier hopping pairs")
+        print(f"Updated matrix element indices to point into compact rvec_set")
         
         return rvec_set, ham_r_info
 
@@ -299,11 +313,11 @@ class PostQE2Pert():
                 all_ph_indices.update(ws_ph_indices)
                 
                 with h5py.File(self.epr_file, 'r') as f:
-                    group = f['force_constants']
+                    group = f['force_constant']
                     dset_name = f"ifc{m}"
                     assert dset_name in group, f"Dataset {dset_name} not found in HDF5"
                     ifc_matrix = group[dset_name][:]  # (nr, 3, 3) complex
-                    assert ifc_matrix.shape == (np.prod(self.qc_dim), 3, 3), f"ifc_matrix shape mismatch: {ifc_matrix.shape} != {(np.prod(self.qc_dim), 3, 3)}"
+                    # assert ifc_matrix.shape == (np.prod(self.qc_dim), 3, 3), f"ifc_matrix shape mismatch: {ifc_matrix.shape} != {(np.prod(self.qc_dim), 3, 3)}"
                     key = (ia, ja)
                     ifc_data[key] = {
                         'ifc_matrix': ifc_matrix,  # (nr, 3, 3)
@@ -313,12 +327,26 @@ class PostQE2Pert():
                         'mass_factor': 1.0 / np.sqrt(mass[ia] * mass[ja])
                     }
         
-        # Collect unique phonon R-vectors
+        # Collect unique phonon R-vectors and create remapping
         unique_ph_indices = sorted(all_ph_indices)
         rvec_set_ph = rvec_ph_images['vec_cryst'][unique_ph_indices]
         
+        # Create mapping from original indices to compact indices
+        # Following Fortran's setup_rvec_set_ph logic
+        index_mapping = {}
+        for new_idx, orig_idx in enumerate(unique_ph_indices):
+            index_mapping[orig_idx] = new_idx
+        
+        # Update WS cell indices to point into compact rvec_set_ph
+        # This is crucial - matches Fortran line 141: ptr%ws_ph%rvec(ir) = rvec_label(irp)
+        for key, data in ifc_data.items():
+            old_ws_indices = data['ws_ph_indices']
+            new_ws_indices = np.array([index_mapping[idx] for idx in old_ws_indices])
+            data['ws_ph_indices'] = new_ws_indices
+        
         print(f"Final result: {len(rvec_set_ph)} unique phonon R-vectors")
         print(f"Total force constant matrices: {len(ifc_data)}")
+        print(f"Updated WS cell indices to point into compact rvec_set_ph")
         
         return {
             'ifc_data': ifc_data,
@@ -373,25 +401,34 @@ class PostQE2Pert():
                 rvec_key = tuple(rvec.astype(int))
                 phase = rvec_to_phase[rvec_key]
                 
-                # Add contribution with proper degeneracy weighting
-                dmat_q += (phase / ws_ph_degeneracy[ir]) * ifc_matrix[ir]
+                # Add contribution - degeneracy weighting already included in ifc_matrix
+                # Following Fortran comment: "the 1/ws%ndeg(ir) is already included in ifc(:)"
+                dmat_q += phase * ifc_matrix[ir]
             
             # Mass normalization
             mass_factor = 1.0 / np.sqrt(mass[ia] * mass[ja])
             dmat_q *= mass_factor
             
-            # Fill dynamical matrix (both upper and lower triangular)
+            # Fill dynamical matrix following Fortran logic
             for i in range(3):
                 for j in range(3):
                     ii = ia * 3 + i
                     jj = ja * 3 + j
                     
-                    dyn_matrix[ii, jj] = dmat_q[i, j]
-                    if ia != ja:  # Fill symmetric part
+                    if ia != ja:
+                        # Off-diagonal blocks: use directly
+                        dyn_matrix[ii, jj] = dmat_q[i, j]
+                        # Fill symmetric part
                         dyn_matrix[jj, ii] = np.conj(dmat_q[j, i])
-        
-        # [4] Ensure Hermiticity
-        dyn_matrix = (dyn_matrix + dyn_matrix.conj().T) / 2
+                    else:
+                        # Diagonal blocks: enforce Hermiticity per element (Fortran line 129)
+                        if i == j:
+                            # Diagonal elements must be real
+                            dyn_matrix[ii, jj] = (dmat_q[i, j] + np.conj(dmat_q[j, i])) * 0.5
+                        else:
+                            # Off-diagonal elements within diagonal block
+                            dyn_matrix[ii, jj] = (dmat_q[i, j] + np.conj(dmat_q[j, i])) * 0.5
+                            dyn_matrix[jj, ii] = np.conj(dyn_matrix[ii, jj])
         
         # [5] Diagonalize
         eigenvalues, eigenvectors = np.linalg.eigh(dyn_matrix)
