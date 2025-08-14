@@ -94,10 +94,10 @@ class PostQE2Pert():
         tot = 0
 
         for ir, (k, j, i) in enumerate(product(range(nr3), range(nr2), range(nr1))):
+            idx_accum_grid[ir] = tot
             base_vec = np.array([i, j, k])
             nimg = 0
-            # Pre-filtering before computing actual hopping distance
-            for (mi, mj, mk) in product(range(-ws_search_range, ws_search_range+1), repeat=3):
+            for (mk, mj, mi) in product(range(-ws_search_range, ws_search_range+1), repeat=3):
                 # supercell translations of base_vec, all physically equivalent positions due to PBC
                 # images are lattice vectors in supercell, just physical copies of base_vec 
                 # base_vec is the primitive index of the supercell
@@ -110,7 +110,6 @@ class PostQE2Pert():
                             
             if nimg < 1:
                 raise ValueError('nim < 1 for grid point ({},{},{})'.format(i, j, k))
-            idx_accum_grid[ir] = tot
             nimag_per_grid[ir] = nimg
             tot += nimg
         
@@ -166,6 +165,156 @@ class PostQE2Pert():
         ws_indices    = np.flatnonzero(itmp)
         ws_degeneracy = itmp[ws_indices]
         return ws_indices, ws_degeneracy
+
+    def extract_force_constants(self):
+        print("Extracting real-space interatomic force constants...")
+        
+        mass = self.mass
+        atom_pos_cart = self.tau # (nat, 3)
+        atom_pos_cryst = self.convert_coordinates(atom_pos_cart, direction='cart_to_crys') # (nat, 3)
+        rvec_ph_images = self.init_rvec_images(kdim=self.qc_dim)
+        
+        # 1. Compute all WS cells
+        print("Setting up Wigner-Seitz cells for IFCs...")
+        ws_cells = {}
+        all_ph_indices = set()
+        
+        for ja in range(self.nat):
+            for ia in range(ja + 1):
+                ws_ph_indices, ws_ph_degeneracy = self.set_wigner_seitz_cell(
+                    self.qc_dim, rvec_ph_images, atom_pos_cryst[ia], atom_pos_cryst[ja]
+                )
+                ws_cells[(ia, ja)] = (ws_ph_indices, ws_ph_degeneracy)
+                all_ph_indices.update(ws_ph_indices)
+
+        # Create compact R-vector set and remapping (for memory efficiency)
+        unique_ph_indices = sorted(all_ph_indices)
+        rvec_set_ph = rvec_ph_images['vec_cryst'][unique_ph_indices]
+        index_mapping = {orig_idx: new_idx for new_idx, orig_idx in enumerate(unique_ph_indices)}
+
+        # Update WS indices to compact indices
+        for key in ws_cells:
+            old_indices, degeneracy = ws_cells[key]
+            new_indices = np.array([index_mapping[idx] for idx in old_indices])
+            ws_cells[key] = (new_indices, degeneracy)
+
+        # Read IFC data
+        m = 0
+        ifc_data = {}
+        with h5py.File(self.epr_file, 'r') as f:
+            group = f['force_constant']
+            for ja in range(self.nat):
+                for ia in range(ja + 1):
+                    m += 1
+                    ws_ph_indices, ws_ph_degeneracy = ws_cells[(ia, ja)]  # Already remapped
+                    nr = len(ws_ph_indices)
+
+                    dset_name = f"ifc{m}"
+                    ifc_matrix = group[dset_name][:]
+                    assert ifc_matrix.shape == (nr, 3, 3), f"ifc_matrix shape mismatch: {ifc_matrix.shape} != ({nr}, 3, 3)"
+                
+                    ifc_data[(ia, ja)] = {
+                        'ifc_matrix': ifc_matrix,
+                        'ws_ph_indices': ws_ph_indices,  # Compact indices
+                        'ws_ph_degeneracy': ws_ph_degeneracy,
+                        'nrp': len(ws_ph_indices),
+                        'mass_factor': 1.0 / np.sqrt(mass[ia] * mass[ja])
+                    }
+
+        return {
+            'ifc_data': ifc_data,
+            'rvec_set_ph': rvec_set_ph,
+            'mass': mass,
+            'ifc_info': [],
+            'atom_pos_cryst': atom_pos_cryst
+        }
+
+    def solve_phonon_modes(self, force_constants, qpoint):
+        """
+        Solve phonon eigenvalue problem at a specific q-point
+        Following Perturbo's solve_phonon_modes
+        
+        Args:
+            force_constants: output from extract_force_constants()
+            qpoint: q-point in crystal coordinates (3,)
+            
+        Returns:
+            frequencies: phonon frequencies (3*nat,)
+            modes: phonon eigenvectors (3*nat, 3*nat) - polarization vectors
+        """
+        ifc_data = force_constants['ifc_data']
+        rvec_set_ph = force_constants['rvec_set_ph']
+        mass = force_constants['mass']
+        
+        nmodes = 3 * self.nat
+        
+        # [1] Compute phase factors e^(iqR), q (3, ), R (nrp, 3)
+        # here rvec is only the lattice R vectors, tau_b-tau_a not included
+        # Maybe IFC already handled that?
+        phase_factors = np.exp(1j * 2 * np.pi * (rvec_set_ph @ qpoint))
+        
+        # Initialize dynamical matrix
+        dyn_matrix = np.zeros((nmodes, nmodes), dtype=np.complex128)
+        
+        # [3] Build dynamical matrix
+        for (ia, ja), data in ifc_data.items():
+            if ia > ja:
+                continue
+            ifc_matrix = data['ifc_matrix']  # (nr, 3, 3)
+            ws_ph_indices = data['ws_ph_indices']
+            
+            # Fourier transform this force constant
+            dmat_q = np.zeros((3, 3), dtype=np.complex128)
+            for ir, rvec_idx in enumerate(ws_ph_indices):
+                rvec = rvec_set_ph[rvec_idx]
+                phase = phase_factors[rvec_idx]
+                dmat_q += phase * ifc_matrix[ir] # no degeneracy weighting needed!
+            
+            # Mass normalization
+            mass_factor = 1.0 / np.sqrt(mass[ia] * mass[ja])
+            dmat_q *= mass_factor
+            
+            # Fill dynamical matrix following Fortran logic
+            for i in range(3):
+                for j in range(3):
+                    ii = ia * 3 + i
+                    jj = ja * 3 + j
+                    
+                    if ia != ja:
+                        # Off-diagonal blocks: use directly
+                        dyn_matrix[ii, jj] = dmat_q[i, j]
+                        # Fill symmetric part
+                        dyn_matrix[jj, ii] = np.conj(dmat_q[j, i])
+                    else:
+                        # Diagonal blocks: enforce Hermiticity per element (Fortran line 129)
+                        if i == j:
+                            # Diagonal elements must be real
+                            dyn_matrix[ii, jj] = (dmat_q[i, j] + np.conj(dmat_q[j, i])) * 0.5
+                        else:
+                            # Off-diagonal elements within diagonal block
+                            dyn_matrix[ii, jj] = (dmat_q[i, j] + np.conj(dmat_q[j, i])) * 0.5
+                            dyn_matrix[jj, ii] = np.conj(dyn_matrix[ii, jj])
+                            # dyn_matrix[jj, ii] = np.conj(dmat_q[i, j])
+        
+        # [5] Diagonalize
+        eigenvalues, eigenvectors = np.linalg.eigh(dyn_matrix)
+        
+        # [6] Compute frequencies
+        frequencies = np.zeros(nmodes)
+        for i in range(nmodes):
+            if eigenvalues[i] >= 0:
+                frequencies[i] = np.sqrt(eigenvalues[i])
+            else:
+                frequencies[i] = -np.sqrt(-eigenvalues[i])  # Negative for imaginary frequencies
+        
+        # [7] Normalize eigenvectors by mass
+        modes = np.zeros_like(eigenvectors)
+        for i in range(nmodes):
+            for j in range(nmodes):
+                ia = j // 3
+                modes[j, i] = eigenvectors[j, i] / np.sqrt(mass[ia])
+        
+        return frequencies, modes
 
     def get_rvec_set(self):
         """
@@ -280,155 +429,7 @@ class PostQE2Pert():
                         assert ep_hop.shape[1] == len_re, f"ep_hop shape mismatch: {ep_hop.shape[1]} != {len_re}"
         
         return matrix_elements
-
-    def extract_force_constants(self):
-        print("Extracting real-space interatomic force constants...")
-        
-        mass = self.mass
-        atom_pos_cart = self.tau # (nat, 3)
-        atom_pos_cryst = self.convert_coordinates(atom_pos_cart, direction='cart_to_crys') # (nat, 3)
-        rvec_ph_images = self.init_rvec_images(kdim=self.qc_dim)
-        
-        # 1. Compute all WS cells
-        print("Setting up Wigner-Seitz cells for IFCs...")
-        ws_cells = {}
-        all_ph_indices = set()
-        
-        for ja in range(self.nat):
-            for ia in range(ja + 1):
-                ws_ph_indices, ws_ph_degeneracy = self.set_wigner_seitz_cell(
-                    self.qc_dim, rvec_ph_images, atom_pos_cryst[ia], atom_pos_cryst[ja]
-                )
-                ws_cells[(ia, ja)] = (ws_ph_indices, ws_ph_degeneracy)
-                all_ph_indices.update(ws_ph_indices)  # Original indices only
-
-        # Create compact R-vector set and remapping (for memory efficiency)
-        unique_ph_indices = sorted(all_ph_indices)
-        rvec_set_ph = rvec_ph_images['vec_cryst'][unique_ph_indices]
-        index_mapping = {orig_idx: new_idx for new_idx, orig_idx in enumerate(unique_ph_indices)}
-
-        # Update WS indices to compact indices
-        for key in ws_cells:
-            old_indices, degeneracy = ws_cells[key]
-            new_indices = np.array([index_mapping[idx] for idx in old_indices])
-            ws_cells[key] = (new_indices, degeneracy)
-
-        # Read IFC data
-        m = 0
-        ifc_data = {}
-        with h5py.File(self.epr_file, 'r') as f:
-            group = f['force_constant']
-            for ja in range(self.nat):
-                for ia in range(ja + 1):
-                    m += 1
-                    ws_ph_indices, ws_ph_degeneracy = ws_cells[(ia, ja)]  # Already remapped
-                    nr = len(ws_ph_indices)
-
-                    dset_name = f"ifc{m}"
-                    ifc_matrix = group[dset_name][:]
-                    assert ifc_matrix.shape == (nr, 3, 3), f"ifc_matrix shape mismatch: {ifc_matrix.shape} != ({nr}, 3, 3)"
-                
-                    ifc_data[(ia, ja)] = {
-                        'ifc_matrix': ifc_matrix,
-                        'ws_ph_indices': ws_ph_indices,  # Compact indices
-                        'ws_ph_degeneracy': ws_ph_degeneracy,
-                        'nrp': len(ws_ph_indices),
-                        'mass_factor': 1.0 / np.sqrt(mass[ia] * mass[ja])
-                    }
-
-        return {
-            'ifc_data': ifc_data,
-            'rvec_set_ph': rvec_set_ph,
-            'mass': mass,
-            'ifc_info': [],
-            'atom_pos_cryst': atom_pos_cryst
-        }
-
-    def solve_phonon_modes(self, force_constants, qpoint):
-        """
-        Solve phonon eigenvalue problem at a specific q-point
-        Following Perturbo's solve_phonon_modes
-        
-        Args:
-            force_constants: output from extract_force_constants()
-            qpoint: q-point in crystal coordinates (3,)
-            
-        Returns:
-            frequencies: phonon frequencies (3*nat,)
-            modes: phonon eigenvectors (3*nat, 3*nat) - polarization vectors
-        """
-        ifc_data = force_constants['ifc_data']
-        rvec_set_ph = force_constants['rvec_set_ph']
-        mass = force_constants['mass']
-        
-        nmodes = 3 * self.nat
-        
-        # [1] Compute phase factors e^(iqR), q (3, ), R (nrp, 3)
-        phase_factors = np.exp(1j * 2 * np.pi * (rvec_set_ph @ qpoint))
-        
-        # Initialize dynamical matrix
-        dyn_matrix = np.zeros((nmodes, nmodes), dtype=np.complex128)
-        
-        # [3] Build dynamical matrix
-        for (ia, ja), data in ifc_data.items():
-            if ia > ja:
-                continue
-            ifc_matrix = data['ifc_matrix']  # (nr, 3, 3)
-            ws_ph_indices = data['ws_ph_indices']
-            
-            # Fourier transform this force constant
-            dmat_q = np.zeros((3, 3), dtype=np.complex128)
-            for ir, rvec_idx in enumerate(ws_ph_indices):
-                rvec = rvec_set_ph[rvec_idx]
-                phase = phase_factors[rvec_idx]
-                dmat_q += phase * ifc_matrix[ir] # no degeneracy weighting needed!
-            
-            # Mass normalization
-            mass_factor = 1.0 / np.sqrt(mass[ia] * mass[ja])
-            dmat_q *= mass_factor
-            
-            # Fill dynamical matrix following Fortran logic
-            for i in range(3):
-                for j in range(3):
-                    ii = ia * 3 + i
-                    jj = ja * 3 + j
-                    
-                    if ia != ja:
-                        # Off-diagonal blocks: use directly
-                        dyn_matrix[ii, jj] = dmat_q[i, j]
-                        # Fill symmetric part
-                        dyn_matrix[jj, ii] = np.conj(dmat_q[j, i])
-                    else:
-                        # Diagonal blocks: enforce Hermiticity per element (Fortran line 129)
-                        if i == j:
-                            # Diagonal elements must be real
-                            dyn_matrix[ii, jj] = (dmat_q[i, j] + np.conj(dmat_q[j, i])) * 0.5
-                        else:
-                            # Off-diagonal elements within diagonal block
-                            dyn_matrix[ii, jj] = (dmat_q[i, j] + np.conj(dmat_q[j, i])) * 0.5
-                            dyn_matrix[jj, ii] = np.conj(dyn_matrix[ii, jj])
-                            # dyn_matrix[jj, ii] = np.conj(dmat_q[i, j])
-        
-        # [5] Diagonalize
-        eigenvalues, eigenvectors = np.linalg.eigh(dyn_matrix)
-        
-        # [6] Compute frequencies
-        frequencies = np.zeros(nmodes)
-        for i in range(nmodes):
-            if eigenvalues[i] >= 0:
-                frequencies[i] = np.sqrt(eigenvalues[i])
-            else:
-                frequencies[i] = -np.sqrt(-eigenvalues[i])  # Negative for imaginary frequencies
-        
-        # [7] Normalize eigenvectors by mass
-        modes = np.zeros_like(eigenvectors)
-        for i in range(nmodes):
-            for j in range(nmodes):
-                ia = j // 3
-                modes[j, i] = eigenvectors[j, i] / np.sqrt(mass[ia])
-        
-        return frequencies, modes
-
+    
     def couple_eph_to_phonon_modes(self, eph_data, force_constants, qpoint):
         """
         Transform electron-phonon coupling from atomic displacements to phonon modes
