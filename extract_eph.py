@@ -6,8 +6,8 @@ from itertools import product
 
 
 def get_length(r_cryst, at):
-    r_cryst = np.asarray(r_cryst, dtype=float)
-    at = np.asarray(at, dtype=float)
+    r_cryst = np.asarray(r_cryst, dtype=np.float64)
+    at = np.asarray(at, dtype=np.float64)
     r_cart = r_cryst @ at
     return np.sqrt(np.einsum('...i,...i->...', r_cart, r_cart))
 
@@ -26,7 +26,7 @@ def set_cutoff_small(rdim, at):
     cutoff = 0.0
     
     for i, j, k in product([-1, 1], repeat=3): # corner points of the k-mesh
-        r_cryst = ndim * np.array([i, j, k], dtype=float)
+        r_cryst = ndim * np.array([i, j, k], dtype=np.float64)
         dist = get_length(r_cryst, at)
         if dist > cutoff:
             cutoff = dist
@@ -367,7 +367,7 @@ class PostQE2Pert():
         phase_factors = np.exp(1j * 2 * np.pi * (rvec_set_ph @ qpoint))
         
         # Initialize dynamical matrix
-        dyn_matrix = np.zeros((nmodes, nmodes), dtype=complex)
+        dyn_matrix = np.zeros((nmodes, nmodes), dtype=np.complex128)
         
         # [3] Build dynamical matrix
         for (ia, ja), data in ifc_data.items():
@@ -377,7 +377,7 @@ class PostQE2Pert():
             ws_ph_indices = data['ws_ph_indices']
             
             # Fourier transform this force constant
-            dmat_q = np.zeros((3, 3), dtype=complex)
+            dmat_q = np.zeros((3, 3), dtype=np.complex128)
             for ir, rvec_idx in enumerate(ws_ph_indices):
                 rvec = rvec_set_ph[rvec_idx]
                 phase = phase_factors[rvec_idx]
@@ -466,7 +466,7 @@ class PostQE2Pert():
             
             # Step 2: Transform to phonon mode coordinates
             # g_{ij}^{n}(R_e, R_p, q) = Σ_{α} g_{ij}^{α,a}(R_e, R_p) * u_{α,a}^{n}(q)
-            ep_phonon_modes_temp = np.zeros((nmodes, nre, nrp_data), dtype=complex)
+            ep_phonon_modes_temp = np.zeros((nmodes, nre, nrp_data), dtype=np.complex128)
             
             for mu in range(nmodes):
                 # Get polarization vector for this mode
@@ -480,7 +480,7 @@ class PostQE2Pert():
             
             # Step 3: Fourier transform phononic part
             # g_{ij}^{n}(R_e, q) = Σ_{R_p} g_{ij}^{n}(R_e, R_p, q) * e^{iq·R_p}
-            ep_final = np.zeros((nmodes, nre), dtype=complex)
+            ep_final = np.zeros((nmodes, nre), dtype=np.complex128)
             
             for mu in range(nmodes):
                 # Sum over phonon R-vectors: (nre, nrp) @ (nrp,) -> (nre,)
@@ -520,7 +520,7 @@ class PostQE2Pert():
         nmodes = 3 * self.nat
         
         frequencies = np.zeros((nq, nmodes))
-        modes = np.zeros((nq, nmodes, nmodes), dtype=complex)
+        modes = np.zeros((nq, nmodes, nmodes), dtype=np.complex128)
         
         print(f"Computing phonon dispersion for {nq} q-points...")
         for iq, qpoint in enumerate(qpath):
