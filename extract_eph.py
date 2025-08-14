@@ -3,7 +3,18 @@
 import h5py
 import numpy as np
 from itertools import product
+import scipy.linalg
 
+def unpack_dyn_matrix(dyn_upper, nmodes):
+    dyn_matrix = np.zeros((nmodes, nmodes), dtype=np.complex128)
+    idx = 0
+    for j in range(nmodes):        # Column index (0-based)
+        for i in range(j + 1):   # Row index, upper triangular (0-based)
+            dyn_matrix[i, j] = dyn_upper[idx]
+            if i != j:
+                dyn_matrix[j, i] = np.conj(dyn_upper[idx])
+            idx += 1
+    return dyn_matrix
 
 def get_length(r_cryst, at):
     r_cryst = np.asarray(r_cryst, dtype=np.float64)
@@ -174,29 +185,28 @@ class PostQE2Pert():
         atom_pos_cryst = self.convert_coordinates(atom_pos_cart, direction='cart_to_crys') # (nat, 3)
         rvec_ph_images = self.init_rvec_images(kdim=self.qc_dim)
         
-        # 1. Compute all WS cells
         print("Setting up Wigner-Seitz cells for IFCs...")
         ws_cells = {}
-        all_ph_indices = set()
-        
+        unique_ph_indices = set()
+
         for ja in range(self.nat):
             for ia in range(ja + 1):
-                ws_ph_indices, ws_ph_degeneracy = self.set_wigner_seitz_cell(
+                ws_ph_indices, _ = self.set_wigner_seitz_cell(
                     self.qc_dim, rvec_ph_images, atom_pos_cryst[ia], atom_pos_cryst[ja]
                 )
-                ws_cells[(ia, ja)] = (ws_ph_indices, ws_ph_degeneracy)
-                all_ph_indices.update(ws_ph_indices)
+                ws_cells[(ia, ja)] = ws_ph_indices
+                unique_ph_indices.update(ws_ph_indices)
 
         # Create compact R-vector set and remapping (for memory efficiency)
-        unique_ph_indices = sorted(all_ph_indices)
+        unique_ph_indices = sorted(unique_ph_indices)
         rvec_set_ph = rvec_ph_images['vec_cryst'][unique_ph_indices]
         index_mapping = {orig_idx: new_idx for new_idx, orig_idx in enumerate(unique_ph_indices)}
 
         # Update WS indices to compact indices
         for key in ws_cells:
-            old_indices, degeneracy = ws_cells[key]
+            old_indices = ws_cells[key]
             new_indices = np.array([index_mapping[idx] for idx in old_indices])
-            ws_cells[key] = (new_indices, degeneracy)
+            ws_cells[key] = new_indices
 
         # Read IFC data
         m = 0
@@ -206,17 +216,18 @@ class PostQE2Pert():
             for ja in range(self.nat):
                 for ia in range(ja + 1):
                     m += 1
-                    ws_ph_indices, ws_ph_degeneracy = ws_cells[(ia, ja)]  # Already remapped
+                    ws_ph_indices = ws_cells[(ia, ja)]
                     nr = len(ws_ph_indices)
 
                     dset_name = f"ifc{m}"
                     ifc_matrix = group[dset_name][:]
                     assert ifc_matrix.shape == (nr, 3, 3), f"ifc_matrix shape mismatch: {ifc_matrix.shape} != ({nr}, 3, 3)"
+                    ifc_matrix = ifc_matrix.transpose(0, 2, 1) # to match Perturbo's column-major convention
+                    # ifc_matrix = (ifc_matrix + ifc_matrix.transpose(0, 2, 1)) * 0.5 # This makes things worse
                 
                     ifc_data[(ia, ja)] = {
                         'ifc_matrix': ifc_matrix,
-                        'ws_ph_indices': ws_ph_indices,  # Compact indices
-                        'ws_ph_degeneracy': ws_ph_degeneracy,
+                        'ws_ph_indices': ws_ph_indices,
                         'nrp': len(ws_ph_indices),
                         'mass_factor': 1.0 / np.sqrt(mass[ia] * mass[ja])
                     }
@@ -225,7 +236,6 @@ class PostQE2Pert():
             'ifc_data': ifc_data,
             'rvec_set_ph': rvec_set_ph,
             'mass': mass,
-            'ifc_info': [],
             'atom_pos_cryst': atom_pos_cryst
         }
 
@@ -244,75 +254,55 @@ class PostQE2Pert():
         """
         ifc_data = force_constants['ifc_data']
         rvec_set_ph = force_constants['rvec_set_ph']
-        mass = force_constants['mass']
+        masses = force_constants['mass']
         
         nmodes = 3 * self.nat
-        
-        # [1] Compute phase factors e^(iqR), q (3, ), R (nrp, 3)
-        # here rvec is only the lattice R vectors, tau_b-tau_a not included
-        # Maybe IFC already handled that?
         phase_factors = np.exp(1j * 2 * np.pi * (rvec_set_ph @ qpoint))
         
-        # Initialize dynamical matrix
-        dyn_matrix = np.zeros((nmodes, nmodes), dtype=np.complex128)
+        # Build dynamical matrix blocks
+        num_atom_pairs = self.nat * (self.nat + 1) // 2
+        dmat = np.zeros((3, 3, num_atom_pairs), dtype=np.complex128)
         
-        # [3] Build dynamical matrix
-        for (ia, ja), data in ifc_data.items():
-            if ia > ja:
-                continue
-            ifc_matrix = data['ifc_matrix']  # (nr, 3, 3)
-            ws_ph_indices = data['ws_ph_indices']
-            
-            # Fourier transform this force constant
-            dmat_q = np.zeros((3, 3), dtype=np.complex128)
-            for ir, rvec_idx in enumerate(ws_ph_indices):
-                rvec = rvec_set_ph[rvec_idx]
-                phase = phase_factors[rvec_idx]
-                dmat_q += phase * ifc_matrix[ir] # no degeneracy weighting needed!
-            
-            # Mass normalization
-            mass_factor = 1.0 / np.sqrt(mass[ia] * mass[ja])
-            dmat_q *= mass_factor
-            
-            # Fill dynamical matrix following Fortran logic
-            for i in range(3):
-                for j in range(3):
-                    ii = ia * 3 + i
-                    jj = ja * 3 + j
-                    
-                    if ia != ja:
-                        # Off-diagonal blocks: use directly
-                        dyn_matrix[ii, jj] = dmat_q[i, j]
-                        # Fill symmetric part
-                        dyn_matrix[jj, ii] = np.conj(dmat_q[j, i])
-                    else:
-                        # Diagonal blocks: enforce Hermiticity per element (Fortran line 129)
-                        if i == j:
-                            # Diagonal elements must be real
-                            dyn_matrix[ii, jj] = (dmat_q[i, j] + np.conj(dmat_q[j, i])) * 0.5
-                        else:
-                            # Off-diagonal elements within diagonal block
-                            dyn_matrix[ii, jj] = (dmat_q[i, j] + np.conj(dmat_q[j, i])) * 0.5
-                            dyn_matrix[jj, ii] = np.conj(dyn_matrix[ii, jj])
-                            # dyn_matrix[jj, ii] = np.conj(dmat_q[i, j])
+        pair_idx = 0
+        for ja in range(self.nat):
+            for ia in range(ja + 1):
+                ifc_matrix = ifc_data[(ia, ja)]['ifc_matrix']
+                ws_ph_indices = ifc_data[(ia, ja)]['ws_ph_indices']
+                mass_factor = 1.0 / np.sqrt(masses[ia] * masses[ja])
+                
+                for ir, rvec_idx in enumerate(ws_ph_indices):
+                    phase = phase_factors[rvec_idx]
+                    dmat[:, :, pair_idx] += phase * ifc_matrix[ir] * mass_factor
+                pair_idx += 1
+                
+        # Pack upper triangular dynamical matrix
+        num_elements = nmodes * (nmodes + 1) // 2
+        dyn_upper = np.zeros(num_elements, dtype=np.complex128)
         
-        # [5] Diagonalize
-        eigenvalues, eigenvectors = np.linalg.eigh(dyn_matrix)
+        for jj in range(nmodes):
+            for ii in range(jj + 1):
+                elem_idx = (jj * (jj + 1)) // 2 + ii
+                
+                ia, i = divmod(ii, 3)
+                ja, j = divmod(jj, 3)
+                
+                pair_idx = (ja * (ja + 1)) // 2 + ia
+                
+                if ia != ja:
+                    dyn_upper[elem_idx] = dmat[i, j, pair_idx]
+                else:
+                    dyn_upper[elem_idx] = (dmat[i, j, pair_idx] + np.conj(dmat[j, i, pair_idx])) * 0.5
         
-        # [6] Compute frequencies
-        frequencies = np.zeros(nmodes)
-        for i in range(nmodes):
-            if eigenvalues[i] >= 0:
-                frequencies[i] = np.sqrt(eigenvalues[i])
-            else:
-                frequencies[i] = -np.sqrt(-eigenvalues[i])  # Negative for imaginary frequencies
+        # Diagonalize dynamical matrix
+        dyn_matrix = unpack_dyn_matrix(dyn_upper, nmodes)
+        eigenvalues, eigenvectors = scipy.linalg.eigh(dyn_matrix)
         
-        # [7] Normalize eigenvectors by mass
-        modes = np.zeros_like(eigenvectors)
-        for i in range(nmodes):
-            for j in range(nmodes):
-                ia = j // 3
-                modes[j, i] = eigenvectors[j, i] / np.sqrt(mass[ia])
+        # Compute frequencies with proper handling of negative eigenvalues
+        frequencies = np.sign(eigenvalues) * np.sqrt(np.abs(eigenvalues))
+        
+        # Normalize eigenvectors by mass
+        mass_sqrt_inv = np.repeat(1.0 / np.sqrt(masses), 3)
+        modes = eigenvectors * mass_sqrt_inv[:, np.newaxis]
         
         return frequencies, modes
 
