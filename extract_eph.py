@@ -261,19 +261,20 @@ class PostQE2Pert():
         
         # Build dynamical matrix blocks
         num_atom_pairs = self.nat * (self.nat + 1) // 2
-        dmat = np.zeros((3, 3, num_atom_pairs), dtype=np.complex128)
+        dmat_without_mass = np.zeros((3, 3, num_atom_pairs), dtype=np.complex128)
         
         pair_idx = 0
         for ja in range(self.nat):
             for ia in range(ja + 1):
                 ifc_matrix = ifc_data[(ia, ja)]['ifc_matrix']
                 ws_ph_indices = ifc_data[(ia, ja)]['ws_ph_indices']
-                mass_factor = 1.0 / np.sqrt(masses[ia] * masses[ja])
                 
                 for ir, rvec_idx in enumerate(ws_ph_indices):
                     phase = phase_factors[rvec_idx]
-                    dmat[:, :, pair_idx] += phase * ifc_matrix[ir] * mass_factor
+                    dmat_without_mass[:, :, pair_idx] += phase * ifc_matrix[ir]
                 pair_idx += 1
+        
+        # np.save('dmat_without_mass.npy', dmat_without_mass)
                 
         # Pack upper triangular dynamical matrix
         num_elements = nmodes * (nmodes + 1) // 2
@@ -285,15 +286,18 @@ class PostQE2Pert():
                 
                 ia, i = divmod(ii, 3)
                 ja, j = divmod(jj, 3)
+                mass_factor = 1.0 / np.sqrt(masses[ia] * masses[ja])
                 
                 pair_idx = (ja * (ja + 1)) // 2 + ia
                 
                 if ia != ja:
-                    dyn_upper[elem_idx] = dmat[i, j, pair_idx]
+                    dyn_upper[elem_idx] = dmat_without_mass[i, j, pair_idx] * mass_factor
                 else:
-                    dyn_upper[elem_idx] = (dmat[i, j, pair_idx] + np.conj(dmat[j, i, pair_idx])) * 0.5
+                    dyn_upper[elem_idx] = (dmat_without_mass[i, j, pair_idx] + np.conj(dmat_without_mass[j, i, pair_idx])) * 0.5 * mass_factor
         
         # Diagonalize dynamical matrix
+        # np.save('dyn_upper.npy', dyn_upper)
+        
         dyn_matrix = unpack_dyn_matrix(dyn_upper, nmodes)
         eigenvalues, eigenvectors = scipy.linalg.eigh(dyn_matrix)
         
