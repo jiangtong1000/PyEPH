@@ -1,58 +1,40 @@
-## Phonon dispersion
+# Phonon dispersion
+## Theory and practice
 
-### Input:
+Phonon dispersion, the $\lambda$-th mode $\omega_\lambda(\mathbf{q})$ is computed by solving the following eigenvalue problem:
+$$
+D(\mathbf{q}) |\mathbf{e}_\lambda\rangle = \omega_\lambda(\mathbf{q})^2 |\mathbf{e}_\lambda\rangle
+$$
+and
+$$
+\omega_\lambda = \begin{cases}
++\sqrt{\lambda} & \text{if } \lambda \geq 0 \\
+-\sqrt{-\lambda} & \text{if } \lambda < 0 \text{ (imaginary frequency)}
+\end{cases}, \quad 
+\mathbf{u}_\lambda^a = \frac{|\mathbf{e}_\lambda\rangle^a}{\sqrt{M_a}}
+$$
+where $D(\mathbf{q})\in \mathbb{C}^{3N_{\mathrm{at}} \times 3N_{\mathrm{at}}}$ is the dynamical matrix at given q-point. 
+
+For each atom pair $(1\le a,b\le N_{\mathrm{at}})$ and associated Cartesian directions $(\alpha,\beta\in [x,y,z])$, the dynamical matrix is constructed by Fourier transformation of the real space IFC tensor:
+$$
+D_{\alpha\beta}^{ab}(\mathbf{q}) = \sum_{\mathbf{R}} \frac{\Phi_{\alpha\beta}^{ab}(\mathbf{R})}{w_{\mathbf{R}}} e^{i \mathbf{q} \cdot \mathbf{R}} \cdot \frac{1}{\sqrt{M_a M_b}}
+$$
+where 
+- $\Phi_{\alpha\beta}^{ab}(\mathbf{R})$ is the interatomic force constant (IFC) tensor which describes the force on atom $a$ in direction $\alpha$ due to displacement of atom $b$ in direction $\beta$ at lattice vector $\mathbf{R}$
+- $w_{\mathbf{R}}$ is the Wigner-Seitz degeneracy weight
+- $M_a, M_b$ are the atomic masses
+- $\mathbf{R}$ is lattice vector connecting atom pairs.
+
+There are infinitely many $\mathbf{R}$ vectors connecting $(a,b)$ through periodicity, 
+since IFC decay rapidly with distance due to the localized nature of atomic interactions, we only need R-vectors within a certain cutoff radius to capture the essential physics. The real-space sphere radius is chosen to extend approximately to half the first Brillouin zone, ensuring adequate sampling of the reciprocal space for accurate phonon dispersion.Within this cutoff sphere, all possible lattice vectors $\mathbf{R}$ are systematically enumerated using a grid-based approach with periodic boundary conditions. For each pair of atoms $(a,b)$, we apply the Wigner-Seitz criteria to find the shortest lattice vector connecting the two atoms.
+
+
+### Code Input:
 - **Interatomic Force Constants (IFCs)**: $\Phi_{\alpha\beta}^{ab}(\mathbf{R})$, tensor structure with shape of $(N_{\mathrm{at}}, N_{\mathrm{at}}, N_R, 3, 3)$
   - $a, b$: atom indices in unit cell ($1 \le a,b \le N_{\mathrm{at}}$)
   - $\mathbf{R}$: lattice vector connecting unit cells ($N_R=\mathrm{q}^3$ total R-vectors)
   - $\alpha, \beta$: Cartesian directions (x, y, z)
   - Physical meaning: Force on atom $a$ in direction $\alpha$ due to displacement of atom $b$ in direction $\beta$ at lattice vector $\mathbf{R}$
-
-### Step-by-Step Algorithm:
-
-#### Step 1: Compute Phase Factors
-For a given q-point $\mathbf{q}$, compute phase factors for all lattice vectors:
-$$
-\text{phase}(\mathbf{R}) = e^{i \mathbf{q} \cdot \mathbf{R}}
-$$
-
-#### Step 2: Fourier Transform to Build Dynamical Matrix
-For each atom pair $(a,b)$ and each Cartesian direction $(\alpha,\beta)$:
-$$
-D_{\alpha\beta}^{ab}(\mathbf{q}) = \sum_{\mathbf{R}} \frac{\Phi_{\alpha\beta}^{ab}(\mathbf{R})}{w_{\mathbf{R}}} e^{i \mathbf{q} \cdot \mathbf{R}} \cdot \frac{1}{\sqrt{M_a M_b}}
-$$
-where:
-- $w_{\mathbf{R}}$ = Wigner-Seitz degeneracy weight
-- $M_a, M_b$ = atomic masses
-
-#### Step 3: Assemble Full Dynamical Matrix
-Build $(3N_{\mathrm{at}} \times 3N_{\mathrm{at}})$ matrix with indices $m = 3a + \alpha$, $n = 3b + \beta$:
-$$
-D_{mn}(\mathbf{q}) = D_{\alpha\beta}^{ab}(\mathbf{q})
-$$
-
-#### Step 4: Ensure Hermiticity
-$$
-D(\mathbf{q}) = \frac{D(\mathbf{q}) + D^{\dagger}(\mathbf{q})}{2}
-$$
-
-#### Step 5: Solve Eigenvalue Problem
-$$
-D(\mathbf{q}) |\mathbf{e}_\lambda\rangle = \omega_\lambda^2 |\mathbf{e}_\lambda\rangle
-$$
-
-#### Step 6: Extract Frequencies
-$$
-\omega_\lambda = \begin{cases}
-+\sqrt{\lambda} & \text{if } \lambda \geq 0 \\
--\sqrt{-\lambda} & \text{if } \lambda < 0 \text{ (imaginary frequency)}
-\end{cases}
-$$
-
-#### Step 7: Mass-Normalize Eigenvectors
-Convert mass-weighted eigenvectors to physical displacement patterns:
-$$
-\mathbf{u}_\lambda^a = \frac{|\mathbf{e}_\lambda\rangle^a}{\sqrt{M_a}}
-$$
 
 ## e-ph coupling matrix in real space
 Instead of working everything in reciprocal space, my resulting Hamiltonian wants the electronic degree of freedom to be in real space and the phonon degree of freedom to be in reciprocal space, which means,
