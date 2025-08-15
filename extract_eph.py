@@ -20,8 +20,7 @@ def get_length(r_cryst, at):
     r_cryst = np.asarray(r_cryst, dtype=np.float64)
     at = np.asarray(at, dtype=np.float64)
     r_cart = r_cryst @ at
-    return np.sqrt(np.einsum('...i,...i->...', r_cart, r_cart))
-
+    return np.linalg.norm(r_cart, axis=-1)
 
 def set_cutoff_small(rdim, at):
     """
@@ -120,8 +119,7 @@ class PostQE2Pert():
             # Crystal to Cartesian: r_cart = at.T @ r_cryst
             return np.array([self.at.T @ pos for pos in positions])
         elif direction == 'cart_to_crys':
-            # Cartesian to Crystal: r_cryst = bg.T @ r_cart # bg.T here is inverse of at.T
-            return np.array([self.bg.T @ pos for pos in positions])
+            return np.array([self.bg @ pos for pos in positions]) # Very careful
         else:
             raise ValueError(f"Invalid direction: {direction}")
 
@@ -205,7 +203,7 @@ class PostQE2Pert():
 
             # Find degenerate images with minimal distance
             dmin = dist.min()
-            sel  = np.isclose(dist, dmin, atol=eps, rtol=0) # (nimg,)
+            sel = dist - dmin < eps
 
             g    = int(sel.sum())
             if g < 1:
@@ -457,8 +455,6 @@ class PostQE2Pert():
                     dmat_without_mass[:, :, pair_idx] += phase * ifc_matrix[ir]
                 pair_idx += 1
         
-        np.save("dmat_without_mass.npy", dmat_without_mass)
-
         # Apply polar correction if needed (following Fortran phonon_dispersion.f90:100-106)
         if self.lpolar:
             if self.verbose:
@@ -468,8 +464,6 @@ class PostQE2Pert():
                 # Add long-range correction to short-range part
                 dmat_without_mass += dmat_lr
         
-        np.save("dmat_without_mass_lr.npy", dmat_without_mass)
-                
         # Pack upper triangular dynamical matrix
         num_elements = nmodes * (nmodes + 1) // 2
         dyn_upper = np.zeros(num_elements, dtype=np.complex128)
@@ -490,7 +484,6 @@ class PostQE2Pert():
                     dyn_upper[elem_idx] = (dmat_without_mass[i, j, pair_idx] + np.conj(dmat_without_mass[j, i, pair_idx])) * 0.5 * mass_factor
         
         # Diagonalize dynamical matrix
-        np.save("dyn_upper.npy", dyn_upper)
         dyn_matrix = unpack_dyn_matrix(dyn_upper, nmodes)
         eigenvalues, eigenvectors = scipy.linalg.eigh(dyn_matrix)
         
