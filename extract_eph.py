@@ -45,8 +45,9 @@ def set_cutoff_small(rdim, at):
     return cutoff
 
 class PostQE2Pert():
-    def __init__(self, epr_file):
+    def __init__(self, epr_file, verbose=False):
         self.epr_file = epr_file
+        self.verbose = verbose
         self.read_hdf5_data()
 
     def read_hdf5_data(self):
@@ -65,9 +66,49 @@ class PostQE2Pert():
             self.nat = f['basic_data/nat'][()]
             self.wannier_center_cryst = f['basic_data/wannier_center_cryst'][:]
             self.tau = f['basic_data/tau'][:]  # atomic positions in cart coordinates (unit of alat). (nat, 3)
-            self.bg = f['basic_data/bg'][:]    # reciprocal lattice vectors in unit of 2pi / alat
+            self.bg = f['basic_data/bg'][:]    # reciprocal lattice vectors in unit of 2pi / alat (3, 3) <-> (spatial, reciprocal)
             self.mass = f['basic_data/mass'][:]  # real, (nat,) atomic masses in atomic unit
-            assert self.wannier_center_cryst.shape == (self.num_wann, 3), f"wannier_center_cryst shape mismatch: {self.wannier_center_cryst.shape} != ({self.num_wann}, 3)"
+            self.volume = f['basic_data/volume'][()]  # unit cell volume
+            self.tpiba = 2.0 * np.pi / self.alat
+            
+            self.lpolar = f['basic_data/lpolar'][()] if 'basic_data/lpolar' in f else False
+            if self.lpolar:
+                if self.verbose:
+                    print("Polar correction is enabled")
+                self.polar_params = {}
+                self.polar_params['epsil'] = f['basic_data/epsil'][:]  # dielectric tensor (3,3)
+                self.polar_params['zstar'] = f['basic_data/zstar'][:]  # Born effective charges (nat,3,3)
+                self.polar_params['polar_alpha'] = f['basic_data/polar_alpha'][()] if 'basic_data/polar_alpha' in f else 1.0
+                assert self.polar_params['polar_alpha'] > 1e-12, "polar_alpha is too small"
+                self.polar_params['loto_alpha'] = f['basic_data/loto_alpha'][()] if 'basic_data/loto_alpha' in f else 1.0
+                
+                self.polar_params['system_2d'] = f['basic_data/system_2d'][()] if 'basic_data/system_2d' in f else False
+                assert not self.polar_params['system_2d'], "2D system is not supported yet"
+                
+                self.polar_params['gmax'] = 14.0
+                ggmax = self.polar_params['gmax'] * 4.0 * self.polar_params['polar_alpha']
+                
+                def estimate_nrx(bg_vec, epsil):
+                    return int(np.ceil(np.sqrt(ggmax / np.dot(bg_vec, np.dot(epsil, bg_vec)))))
+                def estimate_nrx_ph(bg_vec):
+                    return int(np.ceil(np.sqrt(ggmax / np.dot(bg_vec, bg_vec))))
+
+                nrx1 = estimate_nrx(self.bg[:, 0], self.polar_params['epsil'])
+                nrx2 = estimate_nrx(self.bg[:, 1], self.polar_params['epsil'])
+                nrx3 = estimate_nrx(self.bg[:, 2], self.polar_params['epsil'])
+                nrx1_ph = estimate_nrx_ph(self.bg[:, 0])
+                nrx2_ph = estimate_nrx_ph(self.bg[:, 1])
+                nrx3_ph = estimate_nrx_ph(self.bg[:, 2])
+                for i in range(3):
+                    if self.qc_dim[i] < 2:
+                        nrx[i] = 0
+                        nrx_ph[i] = 0
+                self.polar_params['nrx'] = np.array([nrx1, nrx2, nrx3])
+                self.polar_params['nrx_ph'] = np.array([nrx1_ph, nrx2_ph, nrx3_ph])
+                
+                self.init_onsite_polar_correction()
+                    
+        assert self.wannier_center_cryst.shape == (self.num_wann, 3), f"wannier_center_cryst shape mismatch: {self.wannier_center_cryst.shape} != ({self.num_wann}, 3)"
 
     def convert_coordinates(self, positions, direction='crys_to_cart'):
         """
@@ -178,14 +219,16 @@ class PostQE2Pert():
         return ws_indices, ws_degeneracy
 
     def extract_force_constants(self):
-        print("Extracting real-space interatomic force constants...")
+        if self.verbose:
+            print("Extracting real-space interatomic force constants...")
         
         mass = self.mass
         atom_pos_cart = self.tau # (nat, 3)
         atom_pos_cryst = self.convert_coordinates(atom_pos_cart, direction='cart_to_crys') # (nat, 3)
         rvec_ph_images = self.init_rvec_images(kdim=self.qc_dim)
         
-        print("Setting up Wigner-Seitz cells for IFCs...")
+        if self.verbose:
+            print("Setting up Wigner-Seitz cells for IFCs...")
         ws_cells = {}
         unique_ph_indices = set()
 
@@ -239,6 +282,146 @@ class PostQE2Pert():
             'atom_pos_cryst': atom_pos_cryst
         }
 
+    def init_onsite_polar_correction(self):
+        """
+        Initialize onsite correction for polar systems
+        Following Perturbo's init_onsite_correction in polar_correction.f90
+        
+        The onsite correction cancels the long-range contribution at q=0 to enforce
+        the acoustic sum rule for phonons.
+        """
+        if self.verbose:
+            print("  Initializing onsite correction for polar system...")
+        
+        nat = self.nat
+        nelem = nat * (nat + 1) // 2
+        
+        # Compute long-range dynamical matrix at Gamma point (q=0)
+        q_gamma = np.array([0.0, 0.0, 0.0])
+        dyn_gamma = self.dyn_mat_longrange_3d(q_gamma)
+        
+        # Check that result is real (should be for q=0)
+        if np.any(np.abs(np.imag(dyn_gamma)) > 1e-16):
+            print("Warning: Onsite polar correction is not real!")
+        
+        # Unpack upper triangular matrix to full matrix
+        dd = np.zeros((3, 3, nat, nat))
+        n = 0
+        for ja in range(nat):
+            for ia in range(ja + 1):
+                dd0 = np.real(dyn_gamma[:, :, n])
+                
+                dd[:, :, ia, ja] = dd0
+                if ia != ja:
+                    dd[:, :, ja, ia] = dd0.T
+                else:
+                    # Impose Hermiticity for diagonal terms
+                    dd[:, :, ia, ia] = (dd0 + dd0.T) * 0.5
+                n += 1
+        
+        # Compute onsite correction: negative sum over all atom pairs
+        self.onsite_correction = np.zeros((3, 3, nat))
+        for ia in range(nat):
+            dd0 = np.zeros((3, 3))
+            for ja in range(nat):
+                dd0 += dd[:, :, ia, ja]
+            self.onsite_correction[:, :, ia] = -dd0
+        
+        if self.verbose:
+            print(f"  Onsite correction computed for {nat} atoms")
+
+    def dyn_mat_longrange_3d(self, qpoint):
+        """
+        Compute long-range polar correction to dynamical matrix for 3D systems
+        Following Perturbo's dyn_mat_longrange_3d in polar_correction.f90
+        
+        Args:
+            qpoint: q-point in crystal coordinates (3,)
+            
+        Returns:
+            dmat_lr: long-range correction (3, 3, nelem) where nelem = nat*(nat+1)//2
+        """
+        if not self.lpolar:
+            return None
+            
+        nelem = self.nat * (self.nat + 1) // 2
+        nrx1, nrx2, nrx3 = self.polar_params['nrx_ph']
+        
+        # Ewald parameters
+        falph = 4.0 * self.polar_params['polar_alpha']
+        ggmax = self.polar_params['gmax'] * falph
+        fac = 8.0 * np.pi / self.volume # 4pi * e^2 / Volume
+        
+        dmat_lr = np.zeros((3, 3, nelem), dtype=np.complex128)
+        
+        # Prefactor: 4π*e²/Ω
+        
+        # Sum over G-vectors
+        for m1 in range(-nrx1, nrx1 + 1):
+            for m2 in range(-nrx2, nrx2 + 1):
+                for m3 in range(-nrx3, nrx3 + 1):
+                    qG_cryst = qpoint + np.array([m1, m2, m3])
+                    qG_cart = self.bg.T @ qG_cryst
+
+                    qeq = qG_cart @ self.polar_params['epsil'] @ qG_cart
+                    # Skip if too small or too large
+                    if qeq < 1e-14 or qeq > ggmax:
+                        continue
+                        
+                    qfac = np.exp(-qeq / falph) / qeq
+                    
+                    # Sum over atom pairs
+                    n = 0
+                    for ja in range(self.nat):
+                        for ia in range(ja + 1):
+                            phase_arg = 2 * np.pi * np.dot(qG_cart, self.tau[ia] - self.tau[ja])
+                            phase = np.exp(1j * phase_arg)
+                            for i in range(3):
+                                for j in range(3):
+                                    contrib = qG_cart[i] * qG_cart[j] * qfac * phase
+                                    dmat_lr[i, j, n] += contrib
+                            n += 1
+        
+        # Apply Born effective charge tensors
+        for ja in range(self.nat):
+            for ia in range(ja + 1):
+                n = ja * (ja + 1) // 2 + ia
+                temp = dmat_lr[:, :, n] @ self.polar_params['zstar'][ja].T
+                dmat_lr[:, :, n] = self.polar_params['zstar'][ia] @ temp
+    
+        dmat_lr *= fac
+        return dmat_lr
+
+    def dyn_mat_longrange_2d(self, qpoint):
+        raise NotImplementedError("2D long-range polar correction not implemented")
+
+    def dyn_mat_longrange(self, qpoint):
+        """
+        Compute long-range polar correction to dynamical matrix
+        Dispatches to 2D or 3D implementation based on system_2d flag
+        Includes onsite correction as per Perturbo's dyn_mat_longrange
+        
+        Args:
+            qpoint: q-point in crystal coordinates (3,)
+            
+        Returns:
+            dmat_lr: long-range correction (3, 3, nelem) where nelem = nat*(nat+1)//2
+        """
+        if not self.lpolar:
+            return None
+            
+        # Get base long-range correction
+        if self.polar_params['system_2d']:
+            dmat_lr = self.dyn_mat_longrange_2d(qpoint)
+        else:
+            dmat_lr = self.dyn_mat_longrange_3d(qpoint)
+            
+        for ia in range(self.nat):
+            idx = (ia + 1) * (ia + 2) // 2 - 1
+            dmat_lr[:, :, idx] += self.onsite_correction[:, :, ia]
+        
+        return dmat_lr
+
     def solve_phonon_modes(self, force_constants, qpoint):
         """
         Solve phonon eigenvalue problem at a specific q-point
@@ -274,7 +457,18 @@ class PostQE2Pert():
                     dmat_without_mass[:, :, pair_idx] += phase * ifc_matrix[ir]
                 pair_idx += 1
         
-        # np.save('dmat_without_mass.npy', dmat_without_mass)
+        np.save("dmat_without_mass.npy", dmat_without_mass)
+
+        # Apply polar correction if needed (following Fortran phonon_dispersion.f90:100-106)
+        if self.lpolar:
+            if self.verbose:
+                print(f"  Applying polar correction for q = {qpoint}")
+            dmat_lr = self.dyn_mat_longrange(qpoint)
+            if dmat_lr is not None:
+                # Add long-range correction to short-range part
+                dmat_without_mass += dmat_lr
+        
+        np.save("dmat_without_mass_lr.npy", dmat_without_mass)
                 
         # Pack upper triangular dynamical matrix
         num_elements = nmodes * (nmodes + 1) // 2
@@ -296,8 +490,7 @@ class PostQE2Pert():
                     dyn_upper[elem_idx] = (dmat_without_mass[i, j, pair_idx] + np.conj(dmat_without_mass[j, i, pair_idx])) * 0.5 * mass_factor
         
         # Diagonalize dynamical matrix
-        # np.save('dyn_upper.npy', dyn_upper)
-        
+        np.save("dyn_upper.npy", dyn_upper)
         dyn_matrix = unpack_dyn_matrix(dyn_upper, nmodes)
         eigenvalues, eigenvectors = scipy.linalg.eigh(dyn_matrix)
         
@@ -320,15 +513,18 @@ class PostQE2Pert():
         nr1, nr2, nr3 = self.kc_dim
         
         # [1] Generate all possible R vector images
-        print("Generating R vector images...")
+        if self.verbose:
+            print("Generating R vector images...")
         rvec_images = self.init_rvec_images()
-        print(f"Generated {len(rvec_images['vec_cryst'])} R vector images")
+        if self.verbose:
+            print(f"Generated {len(rvec_images['vec_cryst'])} R vector images")
         
         # [2] For each matrix element, find its Wigner-Seitz cell
         ham_r_ws_indices = []
         ham_r_info = {}
         
-        print("Finding Wigner-Seitz cells for each matrix element...")
+        if self.verbose:
+            print("Finding Wigner-Seitz cells for each matrix element...")
         ws_x = 1
         for jb in range(self.num_wann):
             for ib in range(jb + 1):
@@ -350,11 +546,13 @@ class PostQE2Pert():
                     'degeneracy': ws_degeneracy
                 }
                 assert len(ham_r_x) == len(ws_indices), f"hopping_element shape mismatch no. rvecs: {ham_r_x.shape} != {ws_indices.shape}"
-                print(f"  H_{ib+1}{jb+1}: {len(ws_indices)} R vectors")
+                if self.verbose:
+                    print(f"  H_{ib+1}{jb+1}: {len(ws_indices)} R vectors")
                 ws_x += 1
         
         # [3] Collect all unique R vectors and create remapping
-        print("Collecting unique R vectors...")
+        if self.verbose:
+            print("Collecting unique R vectors...")
         all_indices = set()
         for ws_indices in ham_r_ws_indices:
             all_indices.update(ws_indices)
@@ -376,8 +574,9 @@ class PostQE2Pert():
             new_indices = np.array([index_mapping[idx] for idx in old_indices])
             info['rvec_indices'] = new_indices
         
-        print(f"Final result: {len(rvec_set)} unique R vectors for all matrix wannier hopping pairs")
-        print(f"Updated matrix element indices to point into compact rvec_set")
+        if self.verbose:
+            print(f"Final result: {len(rvec_set)} unique R vectors for all matrix wannier hopping pairs")
+            print(f"Updated matrix element indices to point into compact rvec_set")
         
         return rvec_set, ham_r_info
 
@@ -393,7 +592,8 @@ class PostQE2Pert():
             - 'rvec_set_ph': phonon R-vectors
             - 'eph_info': information about each matrix element
         """
-        print("Extracting electron-phonon matrix elements...")
+        if self.verbose:
+            print("Extracting electron-phonon matrix elements...")
         
         eph_info = []
         matrix_elements = {}
@@ -437,13 +637,15 @@ class PostQE2Pert():
         Returns:
             eph_phonon_modes: electron-phonon coupling to phonon modes in mixed representation
         """
-        print(f"Coupling electron-phonon matrix elements to phonon modes at q = {qpoint}")
+        if self.verbose:
+            print(f"Coupling electron-phonon matrix elements to phonon modes at q = {qpoint}")
         
         # [1] Solve phonon modes at this q-point
         frequencies, modes = self.solve_phonon_modes(force_constants, qpoint)
         nmodes = len(frequencies)
         
-        print(f"  Found {nmodes} phonon modes, {frequencies}")
+        if self.verbose:
+            print(f"  Found {nmodes} phonon modes, {frequencies}")
 
         # Get phonon R-vectors for Fourier transform
         rvec_set_ph = force_constants['rvec_set_ph']
@@ -451,7 +653,8 @@ class PostQE2Pert():
         
         # Compute phase factors for Fourier transform: e^{iqR}, q (3, ), R (nrp, 3)
         phase_factors = np.exp(1j * 2 * np.pi * (rvec_set_ph @ qpoint))
-        print(f"  Computed phase factors for {nrp} phonon R-vectors")
+        if self.verbose:
+            print(f"  Computed phase factors for {nrp} phonon R-vectors")
         
         eph_phonon_modes = {}
         
@@ -517,13 +720,15 @@ class PostQE2Pert():
         frequencies = np.zeros((nq, nmodes))
         modes = np.zeros((nq, nmodes, nmodes), dtype=np.complex128)
         
-        print(f"Computing phonon dispersion for {nq} q-points...")
+        if self.verbose:
+            print(f"Computing phonon dispersion for {nq} q-points...")
         for iq, qpoint in enumerate(qpath):
             freq, mode = self.solve_phonon_modes(force_constants, qpoint)
             frequencies[iq] = freq
             modes[iq] = mode
             
             if (iq + 1) % 100 == 0:
-                print(f"  Completed {iq + 1}/{nq} q-points")
+                if self.verbose:
+                    print(f"  Completed {iq + 1}/{nq} q-points")
         
         return frequencies, modes

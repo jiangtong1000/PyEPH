@@ -23,12 +23,12 @@ def parse_qpoint_path(qpoint_string):
         q1 = np.array(high_sym_points[i])
         q2 = np.array(high_sym_points[i + 1])
         
-        qpath.append(q1)
-        ninterp = ninterp_list[i]
+        # qpath.append(q1)
+        ninterp = ninterp_list[i] + 1
         for j in range(ninterp):
-                t = j / ninterp if ninterp > 1 else 0
-                q_interp = q1 + t * (q2 - q1)
-                qpath.append(q_interp)
+            t = j / ninterp if ninterp > 1 else 0
+            q_interp = q1 + t * (q2 - q1)
+            qpath.append(q_interp)
 
     qpath.append(q2)
     qpath = np.array(qpath)
