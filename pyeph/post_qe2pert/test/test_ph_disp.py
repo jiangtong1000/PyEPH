@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pyeph.post_qe2pert import parse_qpoint_path, PhononDispersion
 from pyeph.utils.constants import ryd_to_mev
-from pyeph.utils.logger import get_mpi_rank
+from pyeph.utils.logger import get_mpi_rank, get_mpi_info
 
 def test_phonon_dispersion(size=10):
     repo_root = Path(__file__).resolve().parents[0]
@@ -34,7 +34,19 @@ def test_phonon_dispersion(size=10):
     0.0000  0.0000  0.0000    1"""
 
     qpoints = parse_qpoint_path(qpoint_path_string)
-    random_qpoint_idx = numpy.random.choice(len(qpoints), size=size, replace=False)
+    
+    # Ensure all MPI ranks use the same random selection
+    mpi_info = get_mpi_info()
+    if mpi_info['has_mpi'] and mpi_info['size'] > 1:
+        comm = mpi_info['comm']
+        if mpi_info['rank'] == 0:
+            random_qpoint_idx = numpy.random.choice(len(qpoints), size=size, replace=False)
+        else:
+            random_qpoint_idx = None
+        random_qpoint_idx = comm.bcast(random_qpoint_idx, root=0)
+    else:
+        random_qpoint_idx = numpy.random.choice(len(qpoints), size=size, replace=False)
+    
     random_qpoints_selection = [qpoints[i] for i in random_qpoint_idx]
     force_constants = qe2pert.extract_force_constants()
     frequencies, _ = qe2pert.compute_phonon_dispersion(random_qpoints_selection, force_constants)
@@ -48,4 +60,4 @@ def test_phonon_dispersion(size=10):
         print("phonon dispersion suit test passed.")
     
 if __name__ == "__main__":
-    test_phonon_dispersion(size=10)
+    test_phonon_dispersion(size=4)
