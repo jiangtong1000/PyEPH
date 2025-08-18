@@ -14,7 +14,6 @@ def test_phonon_dispersion():
     phdisp_ref_fname = repo_root / "DNTT_phdisp.h5"
     with h5py.File(phdisp_ref_fname) as fref:
         frequencies = fref["frequencies"][:]
-        modes = fref["modes"][:]
     freq_ref_mev = frequencies * ryd_to_mev
 
     print("Loading data from DNTT_epr.h5 and DNTT_phdisp.yml...")
@@ -37,7 +36,7 @@ def test_phonon_dispersion():
     random_qpoint_idx = numpy.random.choice(len(qpoints), size=10, replace=False)
     random_qpoints_selection = [qpoints[i] for i in random_qpoint_idx]
     force_constants = qe2pert.extract_force_constants()
-    frequencies, modes = qe2pert.compute_phonon_dispersion(random_qpoints_selection, force_constants)
+    frequencies, _ = qe2pert.compute_phonon_dispersion(random_qpoints_selection, force_constants)
     frequencies = frequencies * ryd_to_mev
     freq_ref_mev = freq_ref_mev[random_qpoint_idx]
     assert numpy.allclose(frequencies, freq_ref_mev)
