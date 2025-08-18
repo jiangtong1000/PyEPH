@@ -1,5 +1,8 @@
 *.pyc
 *.h5
+*.err
+*.out
+*.sh
 wflow.md
 __pycache__/
 

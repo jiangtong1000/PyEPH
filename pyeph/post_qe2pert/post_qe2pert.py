@@ -5,48 +5,16 @@ import numpy as np
 from itertools import product
 import scipy.linalg
 
-def unpack_dyn_matrix(dyn_upper, nmodes):
-    dyn_matrix = np.zeros((nmodes, nmodes), dtype=np.complex128)
-    idx = 0
-    for j in range(nmodes):        # Column index (0-based)
-        for i in range(j + 1):   # Row index, upper triangular (0-based)
-            dyn_matrix[i, j] = dyn_upper[idx]
-            if i != j:
-                dyn_matrix[j, i] = np.conj(dyn_upper[idx])
-            idx += 1
-    return dyn_matrix
+from pyeph.post_qe2pert.linalg import unpack_dyn_matrix
+from pyeph.post_qe2pert.utils import get_length, set_cutoff_small
+from pyeph.utils.logger import setup_logger
 
-def get_length(r_cryst, at):
-    r_cryst = np.asarray(r_cryst, dtype=np.float64)
-    at = np.asarray(at, dtype=np.float64)
-    r_cart = r_cryst @ at
-    return np.linalg.norm(r_cart, axis=-1)
-
-def set_cutoff_small(rdim, at):
-    """
-    Retrun the cutoff radius in real space for Wigner-Seitz cell vector search
-    (the edge of the first Brillouin zone in reciprocal space)
-    Define a sphere in real space containing all R-vectors within approx half of the Brillouin zone
-    This ensures we capture all relevant R-vectors for Wannier hopping while avoiding unnecessary computations
-    for R-vectors far away from the Brillouin zone.
-    rdim: k-mesh dimensions [nk1, nk2, nk3]
-    at: lattice vectors (3,3)
-    """
-    ndim = np.array(rdim) // 2 + 1 # half width of the k-mesh plus 1
-    cutoff = 0.0
-    
-    for i, j, k in product([-1, 1], repeat=3): # corner points of the k-mesh
-        r_cryst = ndim * np.array([i, j, k], dtype=np.float64)
-        dist = get_length(r_cryst, at)
-        if dist > cutoff:
-            cutoff = dist
-    
-    return cutoff
 
 class PostQE2Pert():
     def __init__(self, epr_file, verbose=False):
         self.epr_file = epr_file
         self.verbose = verbose
+        self.logger = setup_logger("post_qe2pert", level="DEBUG" if verbose else "INFO")
         self.read_hdf5_data()
 
     def read_hdf5_data(self):
@@ -72,8 +40,7 @@ class PostQE2Pert():
             
             self.lpolar = f['basic_data/lpolar'][()] if 'basic_data/lpolar' in f else False
             if self.lpolar:
-                if self.verbose:
-                    print("Polar correction is enabled")
+                self.logger.info("Polar correction is enabled")
                 self.polar_params = {}
                 self.polar_params['epsil'] = f['basic_data/epsil'][:]  # dielectric tensor (3,3)
                 self.polar_params['zstar'] = f['basic_data/zstar'][:]  # Born effective charges (nat,3,3)
@@ -217,16 +184,14 @@ class PostQE2Pert():
         return ws_indices, ws_degeneracy
 
     def extract_force_constants(self):
-        if self.verbose:
-            print("Extracting real-space interatomic force constants...")
+        self.logger.info("Extracting real-space interatomic force constants...")
         
         mass = self.mass
         atom_pos_cart = self.tau # (nat, 3)
         atom_pos_cryst = self.convert_coordinates(atom_pos_cart, direction='cart_to_crys') # (nat, 3)
         rvec_ph_images = self.init_rvec_images(kdim=self.qc_dim)
         
-        if self.verbose:
-            print("Setting up Wigner-Seitz cells for IFCs...")
+        self.logger.debug("Setting up Wigner-Seitz cells for IFCs...")
         ws_cells = {}
         unique_ph_indices = set()
 
@@ -288,8 +253,7 @@ class PostQE2Pert():
         The onsite correction cancels the long-range contribution at q=0 to enforce
         the acoustic sum rule for phonons.
         """
-        if self.verbose:
-            print("  Initializing onsite correction for polar system...")
+        self.logger.debug("Initializing onsite correction for polar system...")
         
         nat = self.nat
         nelem = nat * (nat + 1) // 2
@@ -325,8 +289,7 @@ class PostQE2Pert():
                 dd0 += dd[:, :, ia, ja]
             self.onsite_correction[:, :, ia] = -dd0
         
-        if self.verbose:
-            print(f"  Onsite correction computed for {nat} atoms")
+        self.logger.debug(f"Onsite correction computed for {nat} atoms")
 
     def dyn_mat_longrange_3d(self, qpoint):
         """
@@ -351,8 +314,6 @@ class PostQE2Pert():
         fac = 8.0 * np.pi / self.volume # 4pi * e^2 / Volume
         
         dmat_lr = np.zeros((3, 3, nelem), dtype=np.complex128)
-        
-        # Prefactor: 4π*e²/Ω
         
         # Sum over G-vectors
         for m1 in range(-nrx1, nrx1 + 1):
@@ -420,82 +381,6 @@ class PostQE2Pert():
         
         return dmat_lr
 
-    def solve_phonon_modes(self, force_constants, qpoint):
-        """
-        Solve phonon eigenvalue problem at a specific q-point
-        Following Perturbo's solve_phonon_modes
-        
-        Args:
-            force_constants: output from extract_force_constants()
-            qpoint: q-point in crystal coordinates (3,)
-            
-        Returns:
-            frequencies: phonon frequencies (3*nat,)
-            modes: phonon eigenvectors (3*nat, 3*nat) - polarization vectors
-        """
-        ifc_data = force_constants['ifc_data']
-        rvec_set_ph = force_constants['rvec_set_ph']
-        masses = force_constants['mass']
-        
-        nmodes = 3 * self.nat
-        phase_factors = np.exp(1j * 2 * np.pi * (rvec_set_ph @ qpoint))
-        
-        # Build dynamical matrix blocks
-        num_atom_pairs = self.nat * (self.nat + 1) // 2
-        dmat_without_mass = np.zeros((3, 3, num_atom_pairs), dtype=np.complex128)
-        
-        pair_idx = 0
-        for ja in range(self.nat):
-            for ia in range(ja + 1):
-                ifc_matrix = ifc_data[(ia, ja)]['ifc_matrix']
-                ws_ph_indices = ifc_data[(ia, ja)]['ws_ph_indices']
-                
-                for ir, rvec_idx in enumerate(ws_ph_indices):
-                    phase = phase_factors[rvec_idx]
-                    dmat_without_mass[:, :, pair_idx] += phase * ifc_matrix[ir]
-                pair_idx += 1
-        
-        # Apply polar correction if needed (following Fortran phonon_dispersion.f90:100-106)
-        if self.lpolar:
-            if self.verbose:
-                print(f"  Applying polar correction for q = {qpoint}")
-            dmat_lr = self.dyn_mat_longrange(qpoint)
-            if dmat_lr is not None:
-                # Add long-range correction to short-range part
-                dmat_without_mass += dmat_lr
-        
-        # Pack upper triangular dynamical matrix
-        num_elements = nmodes * (nmodes + 1) // 2
-        dyn_upper = np.zeros(num_elements, dtype=np.complex128)
-        
-        for jj in range(nmodes):
-            for ii in range(jj + 1):
-                elem_idx = (jj * (jj + 1)) // 2 + ii
-                
-                ia, i = divmod(ii, 3)
-                ja, j = divmod(jj, 3)
-                mass_factor = 1.0 / np.sqrt(masses[ia] * masses[ja])
-                
-                pair_idx = (ja * (ja + 1)) // 2 + ia
-                
-                if ia != ja:
-                    dyn_upper[elem_idx] = dmat_without_mass[i, j, pair_idx] * mass_factor
-                else:
-                    dyn_upper[elem_idx] = (dmat_without_mass[i, j, pair_idx] + np.conj(dmat_without_mass[j, i, pair_idx])) * 0.5 * mass_factor
-        
-        # Diagonalize dynamical matrix
-        dyn_matrix = unpack_dyn_matrix(dyn_upper, nmodes)
-        eigenvalues, eigenvectors = scipy.linalg.eigh(dyn_matrix)
-        
-        # Compute frequencies with proper handling of negative eigenvalues
-        frequencies = np.sign(eigenvalues) * np.sqrt(np.abs(eigenvalues))
-        
-        # Normalize eigenvectors by mass
-        mass_sqrt_inv = np.repeat(1.0 / np.sqrt(masses), 3)
-        modes = eigenvectors * mass_sqrt_inv[:, np.newaxis]
-        
-        return frequencies, modes
-
     def get_rvec_set(self):
         """
         Perturbo's set_ws_cell_el to get R vector set in crystal coordinates
@@ -506,18 +391,15 @@ class PostQE2Pert():
         nr1, nr2, nr3 = self.kc_dim
         
         # [1] Generate all possible R vector images
-        if self.verbose:
-            print("Generating R vector images...")
+        self.logger.debug("Generating R vector images...")
         rvec_images = self.init_rvec_images()
-        if self.verbose:
-            print(f"Generated {len(rvec_images['vec_cryst'])} R vector images")
+        self.logger.debug(f"Generated {len(rvec_images['vec_cryst'])} R vector images")
         
         # [2] For each matrix element, find its Wigner-Seitz cell
         ham_r_ws_indices = []
         ham_r_info = {}
         
-        if self.verbose:
-            print("Finding Wigner-Seitz cells for each matrix element...")
+        self.logger.debug("Finding Wigner-Seitz cells for each matrix element...")
         ws_x = 1
         for jb in range(self.num_wann):
             for ib in range(jb + 1):
@@ -539,13 +421,11 @@ class PostQE2Pert():
                     'degeneracy': ws_degeneracy
                 }
                 assert len(ham_r_x) == len(ws_indices), f"hopping_element shape mismatch no. rvecs: {ham_r_x.shape} != {ws_indices.shape}"
-                if self.verbose:
-                    print(f"  H_{ib+1}{jb+1}: {len(ws_indices)} R vectors")
+                self.logger.debug(f"H_{ib+1}{jb+1}: {len(ws_indices)} R vectors")
                 ws_x += 1
         
         # [3] Collect all unique R vectors and create remapping
-        if self.verbose:
-            print("Collecting unique R vectors...")
+        self.logger.debug("Collecting unique R vectors...")
         all_indices = set()
         for ws_indices in ham_r_ws_indices:
             all_indices.update(ws_indices)
@@ -567,9 +447,8 @@ class PostQE2Pert():
             new_indices = np.array([index_mapping[idx] for idx in old_indices])
             info['rvec_indices'] = new_indices
         
-        if self.verbose:
-            print(f"Final result: {len(rvec_set)} unique R vectors for all matrix wannier hopping pairs")
-            print(f"Updated matrix element indices to point into compact rvec_set")
+        self.logger.info(f"Final result: {len(rvec_set)} unique R vectors for all matrix wannier hopping pairs")
+        self.logger.debug("Updated matrix element indices to point into compact rvec_set")
         
         return rvec_set, ham_r_info
 
@@ -585,8 +464,7 @@ class PostQE2Pert():
             - 'rvec_set_ph': phonon R-vectors
             - 'eph_info': information about each matrix element
         """
-        if self.verbose:
-            print("Extracting electron-phonon matrix elements...")
+        self.logger.info("Extracting electron-phonon matrix elements...")
         
         eph_info = []
         matrix_elements = {}
@@ -616,112 +494,3 @@ class PostQE2Pert():
                         assert ep_hop.shape[1] == len_re, f"ep_hop shape mismatch: {ep_hop.shape[1]} != {len_re}"
         
         return matrix_elements
-    
-    def couple_eph_to_phonon_modes(self, eph_data, force_constants, qpoint):
-        """
-        Transform electron-phonon coupling from atomic displacements to phonon modes
-        Following the algorithm in notes.md
-        
-        Args:
-            eph_data: output from extract_eph_in_real_space()
-            force_constants: output from extract_force_constants()
-            qpoint: q-point in crystal coordinates (3,)
-            
-        Returns:
-            eph_phonon_modes: electron-phonon coupling to phonon modes in mixed representation
-        """
-        if self.verbose:
-            print(f"Coupling electron-phonon matrix elements to phonon modes at q = {qpoint}")
-        
-        # [1] Solve phonon modes at this q-point
-        frequencies, modes = self.solve_phonon_modes(force_constants, qpoint)
-        nmodes = len(frequencies)
-        
-        if self.verbose:
-            print(f"  Found {nmodes} phonon modes, {frequencies}")
-
-        # Get phonon R-vectors for Fourier transform
-        rvec_set_ph = force_constants['rvec_set_ph']
-        nrp = len(rvec_set_ph)
-        
-        # Compute phase factors for Fourier transform: e^{iqR}, q (3, ), R (nrp, 3)
-        phase_factors = np.exp(1j * 2 * np.pi * (rvec_set_ph @ qpoint))
-        if self.verbose:
-            print(f"  Computed phase factors for {nrp} phonon R-vectors")
-        
-        eph_phonon_modes = {}
-        
-        for (iw, jw, ia), data in eph_data.items():
-            ep_hop = data['ep_hop']  # (nrp, nre, 3) - Python/HDF5 convention
-            nrp_data, nre, _ = ep_hop.shape
-            
-            # Step 2: Transform to phonon mode coordinates
-            # g_{ij}^{n}(R_e, R_p, q) = Σ_{α} g_{ij}^{α,a}(R_e, R_p) * u_{α,a}^{n}(q)
-            ep_phonon_modes_temp = np.zeros((nmodes, nre, nrp_data), dtype=np.complex128)
-            
-            for mu in range(nmodes):
-                # Get polarization vector for this mode
-                e_mu = modes[:, mu]  # (3*nat,)
-                
-                # Transform: sum over displacement directions for this atom
-                for alpha in range(3):
-                    mode_component = e_mu[ia * 3 + alpha]  # Polarization for atom ia, direction alpha
-                    # ep_hop[:, :, alpha] has shape (nrp, nre)
-                    ep_phonon_modes_temp[mu] += mode_component * ep_hop[:, :, alpha].T  # Now (nre, nrp)
-            
-            # Step 3: Fourier transform phononic part
-            # g_{ij}^{n}(R_e, q) = Σ_{R_p} g_{ij}^{n}(R_e, R_p, q) * e^{iq·R_p}
-            ep_final = np.zeros((nmodes, nre), dtype=np.complex128)
-            
-            for mu in range(nmodes):
-                # Sum over phonon R-vectors: (nre, nrp) @ (nrp,) -> (nre,)
-                ep_final[mu] = ep_phonon_modes_temp[mu] @ phase_factors[:nrp_data]
-            
-            # Store final result: g_{ij}^n(R, R', q) where R=0, R'=R_e
-            eph_phonon_modes[(iw, jw, ia)] = {
-                'coupling_matrix': ep_final,  # (nmodes, nre) - final mixed representation
-                'frequencies': frequencies,
-                'modes': modes,
-                'qpoint': qpoint,
-                'shape_info': f'({nmodes} modes, {nre} R_e vectors)'
-            }
-            
-            if (iw, jw, ia) == list(eph_data.keys())[0]:  # Print info for first element
-                print(f"  Transformed {(iw, jw, ia)}: {ep_hop.shape} -> {ep_final.shape}")
-                print(f"    Step 2: (nrp, nre, 3) -> (nmodes, nre, nrp)")  
-                print(f"    Step 3: (nmodes, nre, nrp) -> (nmodes, nre) via Fourier transform")
-        
-        print(f"  Transformed {len(eph_phonon_modes)} electron-phonon matrix elements")
-        
-        return eph_phonon_modes
-
-    def compute_phonon_dispersion(self, qpath, force_constants):
-        """
-        Compute phonon dispersion along a q-path
-        
-        Args:
-            qpath: array of q-points (nq, 3) in crystal coordinates
-            force_constants: output from extract_force_constants()
-            
-        Returns:
-            frequencies: phonon frequencies (nq, 3*nat)
-            modes: phonon eigenvectors (nq, 3*nat, 3*nat)
-        """
-        nq = len(qpath)
-        nmodes = 3 * self.nat
-        
-        frequencies = np.zeros((nq, nmodes))
-        modes = np.zeros((nq, nmodes, nmodes), dtype=np.complex128)
-        
-        if self.verbose:
-            print(f"Computing phonon dispersion for {nq} q-points...")
-        for iq, qpoint in enumerate(qpath):
-            freq, mode = self.solve_phonon_modes(force_constants, qpoint)
-            frequencies[iq] = freq
-            modes[iq] = mode
-            
-            if (iq + 1) % 100 == 0:
-                if self.verbose:
-                    print(f"  Completed {iq + 1}/{nq} q-points")
-        
-        return frequencies, modes
