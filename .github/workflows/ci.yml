@@ -69,4 +69,4 @@ jobs:
     - name: Run MPI test with 4 processes
       run: |
         cd pyeph/post_qe2pert/test
-        mpirun -n 4 python run.py
+        mpirun --oversubscribe -n 4 python run.py
