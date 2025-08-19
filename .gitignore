@@ -3,7 +3,9 @@
 *.err
 *.out
 *.sh
-wflow.md
 __pycache__/
 
 notes/
+notes.md
+wflow.md
+C*.md
