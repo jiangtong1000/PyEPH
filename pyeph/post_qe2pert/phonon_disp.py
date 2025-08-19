@@ -13,6 +13,243 @@ class PhononDispersion(PostQE2Pert):
     def __init__(self, epr_file, verbose=False):
         super().__init__(epr_file, verbose)
         self.logger = self.logger.getChild("phonon_disp")
+        self.setup_polar_correction()
+    
+    def setup_polar_correction(self):
+        with h5py.File(self.epr_file, 'r') as f:
+            self.lpolar = f['basic_data/lpolar'][()] if 'basic_data/lpolar' in f else False
+            if self.lpolar:
+                self.logger.info("Polar correction is enabled")
+                self.polar_params = {}
+                self.polar_params['epsil'] = f['basic_data/epsil'][:]  # dielectric tensor (3,3)
+                self.polar_params['zstar'] = f['basic_data/zstar'][:]  # Born effective charges (nat,3,3)
+                self.polar_params['polar_alpha'] = f['basic_data/polar_alpha'][()] if 'basic_data/polar_alpha' in f else 1.0
+                assert self.polar_params['polar_alpha'] > 1e-12, "polar_alpha is too small"
+                self.polar_params['loto_alpha'] = f['basic_data/loto_alpha'][()] if 'basic_data/loto_alpha' in f else 1.0
+                
+                self.polar_params['system_2d'] = f['basic_data/system_2d'][()] if 'basic_data/system_2d' in f else False
+                assert not self.polar_params['system_2d'], "2D system is not supported yet"
+                
+                self.polar_params['gmax'] = 14.0
+                ggmax = self.polar_params['gmax'] * 4.0 * self.polar_params['polar_alpha']
+                
+                def estimate_nrx(bg_vec, epsil):
+                    return int(np.ceil(np.sqrt(ggmax / np.dot(bg_vec, np.dot(epsil, bg_vec)))))
+                def estimate_nrx_ph(bg_vec):
+                    return int(np.ceil(np.sqrt(ggmax / np.dot(bg_vec, bg_vec))))
+
+                nrx1 = estimate_nrx(self.bg[:, 0], self.polar_params['epsil'])
+                nrx2 = estimate_nrx(self.bg[:, 1], self.polar_params['epsil'])
+                nrx3 = estimate_nrx(self.bg[:, 2], self.polar_params['epsil'])
+                nrx1_ph = estimate_nrx_ph(self.bg[:, 0])
+                nrx2_ph = estimate_nrx_ph(self.bg[:, 1])
+                nrx3_ph = estimate_nrx_ph(self.bg[:, 2])
+                for i in range(3):
+                    if self.qc_dim[i] < 2:
+                        nrx[i] = 0
+                        nrx_ph[i] = 0
+                self.polar_params['nrx'] = np.array([nrx1, nrx2, nrx3])
+                self.polar_params['nrx_ph'] = np.array([nrx1_ph, nrx2_ph, nrx3_ph])
+                
+                self.init_onsite_polar_correction()
+
+    def init_onsite_polar_correction(self):
+        """
+        Initialize onsite correction for polar systems
+        Following Perturbo's init_onsite_correction in polar_correction.f90
+        
+        The onsite correction cancels the long-range contribution at q=0 to enforce
+        the acoustic sum rule for phonons.
+        """
+        self.logger.debug("Initializing onsite correction for polar system...")
+        
+        nat = self.nat
+        nelem = nat * (nat + 1) // 2
+        
+        # Compute long-range dynamical matrix at Gamma point (q=0)
+        q_gamma = np.array([0.0, 0.0, 0.0])
+        dyn_gamma = self.dyn_mat_longrange_3d(q_gamma)
+        
+        # Check that result is real (should be for q=0)
+        if np.any(np.abs(np.imag(dyn_gamma)) > 1e-16):
+            print("Warning: Onsite polar correction is not real!")
+        
+        # Unpack upper triangular matrix to full matrix
+        dd = np.zeros((3, 3, nat, nat))
+        n = 0
+        for ja in range(nat):
+            for ia in range(ja + 1):
+                dd0 = np.real(dyn_gamma[:, :, n])
+                
+                dd[:, :, ia, ja] = dd0
+                if ia != ja:
+                    dd[:, :, ja, ia] = dd0.T
+                else:
+                    # Impose Hermiticity for diagonal terms
+                    dd[:, :, ia, ia] = (dd0 + dd0.T) * 0.5
+                n += 1
+        
+        # Compute onsite correction: negative sum over all atom pairs
+        self.onsite_correction = np.zeros((3, 3, nat))
+        for ia in range(nat):
+            dd0 = np.zeros((3, 3))
+            for ja in range(nat):
+                dd0 += dd[:, :, ia, ja]
+            self.onsite_correction[:, :, ia] = -dd0
+        
+        self.logger.debug(f"Onsite correction computed for {nat} atoms")
+
+    def dyn_mat_longrange_3d(self, qpoint):
+        """
+        Compute long-range polar correction to dynamical matrix for 3D systems
+        Following Perturbo's dyn_mat_longrange_3d in polar_correction.f90
+        
+        Args:
+            qpoint: q-point in crystal coordinates (3,)
+            
+        Returns:
+            dmat_lr: long-range correction (3, 3, nelem) where nelem = nat*(nat+1)//2
+        """
+        if not self.lpolar:
+            return None
+            
+        nelem = self.nat * (self.nat + 1) // 2
+        nrx1, nrx2, nrx3 = self.polar_params['nrx_ph']
+        
+        # Ewald parameters
+        falph = 4.0 * self.polar_params['polar_alpha']
+        ggmax = self.polar_params['gmax'] * falph
+        fac = 8.0 * np.pi / self.volume # 4pi * e^2 / Volume
+        
+        dmat_lr = np.zeros((3, 3, nelem), dtype=np.complex128)
+        
+        # Sum over G-vectors
+        for m1 in range(-nrx1, nrx1 + 1):
+            for m2 in range(-nrx2, nrx2 + 1):
+                for m3 in range(-nrx3, nrx3 + 1):
+                    qG_cryst = qpoint + np.array([m1, m2, m3])
+                    qG_cart = self.bg.T @ qG_cryst
+
+                    qeq = qG_cart @ self.polar_params['epsil'] @ qG_cart
+                    # Skip if too small or too large
+                    if qeq < 1e-14 or qeq > ggmax:
+                        continue
+                        
+                    qfac = np.exp(-qeq / falph) / qeq
+                    
+                    # Sum over atom pairs
+                    n = 0
+                    for ja in range(self.nat):
+                        for ia in range(ja + 1):
+                            phase_arg = 2 * np.pi * np.dot(qG_cart, self.tau[ia] - self.tau[ja])
+                            phase = np.exp(1j * phase_arg)
+                            for i in range(3):
+                                for j in range(3):
+                                    contrib = qG_cart[i] * qG_cart[j] * qfac * phase
+                                    dmat_lr[i, j, n] += contrib
+                            n += 1
+        
+        # Apply Born effective charge tensors
+        for ja in range(self.nat):
+            for ia in range(ja + 1):
+                n = ja * (ja + 1) // 2 + ia
+                temp = dmat_lr[:, :, n] @ self.polar_params['zstar'][ja].T
+                dmat_lr[:, :, n] = self.polar_params['zstar'][ia] @ temp
+    
+        dmat_lr *= fac
+        return dmat_lr
+
+    def dyn_mat_longrange_2d(self, qpoint):
+        raise NotImplementedError("2D long-range polar correction not implemented")
+
+    def dyn_mat_longrange(self, qpoint):
+        """
+        Compute long-range polar correction to dynamical matrix
+        Dispatches to 2D or 3D implementation based on system_2d flag
+        Includes onsite correction as per Perturbo's dyn_mat_longrange
+        
+        Args:
+            qpoint: q-point in crystal coordinates (3,)
+            
+        Returns:
+            dmat_lr: long-range correction (3, 3, nelem) where nelem = nat*(nat+1)//2
+        """
+        if not self.lpolar:
+            return None
+            
+        # Get base long-range correction
+        if self.polar_params['system_2d']:
+            dmat_lr = self.dyn_mat_longrange_2d(qpoint)
+        else:
+            dmat_lr = self.dyn_mat_longrange_3d(qpoint)
+            
+        for ia in range(self.nat):
+            idx = (ia + 1) * (ia + 2) // 2 - 1
+            dmat_lr[:, :, idx] += self.onsite_correction[:, :, ia]
+        
+        return dmat_lr
+
+    def extract_force_constants(self):
+        self.logger.info("Extracting real-space interatomic force constants...")
+        
+        mass = self.mass
+        atom_pos_cart = self.tau # (nat, 3)
+        atom_pos_cryst = self.convert_coordinates(atom_pos_cart, direction='cart_to_crys') # (nat, 3)
+        rvec_ph_images = self.init_rvec_images(kdim=self.qc_dim)
+        
+        self.logger.debug("Setting up Wigner-Seitz cells for IFCs...")
+        ws_cells = {}
+        unique_ph_indices = set()
+
+        for ja in range(self.nat):
+            for ia in range(ja + 1):
+                ws_ph_indices, _ = self.set_wigner_seitz_cell(
+                    self.qc_dim, rvec_ph_images, atom_pos_cryst[ia], atom_pos_cryst[ja]
+                )
+                ws_cells[(ia, ja)] = ws_ph_indices
+                unique_ph_indices.update(ws_ph_indices)
+
+        # Create compact R-vector set and remapping (for memory efficiency)
+        unique_ph_indices = sorted(unique_ph_indices)
+        rvec_set_ph = rvec_ph_images['vec_cryst'][unique_ph_indices]
+        index_mapping = {orig_idx: new_idx for new_idx, orig_idx in enumerate(unique_ph_indices)}
+
+        # Update WS indices to compact indices
+        for key in ws_cells:
+            old_indices = ws_cells[key]
+            new_indices = np.array([index_mapping[idx] for idx in old_indices])
+            ws_cells[key] = new_indices
+
+        # Read IFC data
+        m = 0
+        ifc_data = {}
+        with h5py.File(self.epr_file, 'r') as f:
+            group = f['force_constant']
+            for ja in range(self.nat):
+                for ia in range(ja + 1):
+                    m += 1
+                    ws_ph_indices = ws_cells[(ia, ja)]
+                    nr = len(ws_ph_indices)
+
+                    dset_name = f"ifc{m}"
+                    ifc_matrix = group[dset_name][:]
+                    assert ifc_matrix.shape == (nr, 3, 3), f"ifc_matrix shape mismatch: {ifc_matrix.shape} != ({nr}, 3, 3)"
+                    ifc_matrix = ifc_matrix.transpose(0, 2, 1) # to match Perturbo's column-major convention
+                    # ifc_matrix = (ifc_matrix + ifc_matrix.transpose(0, 2, 1)) * 0.5 # This makes things worse
+                
+                    ifc_data[(ia, ja)] = {
+                        'ifc_matrix': ifc_matrix,
+                        'ws_ph_indices': ws_ph_indices,
+                        'nrp': len(ws_ph_indices),
+                        'mass_factor': 1.0 / np.sqrt(mass[ia] * mass[ja])
+                    }
+
+        return {
+            'ifc_data': ifc_data,
+            'rvec_set_ph': rvec_set_ph,
+            'mass': mass,
+            'atom_pos_cryst': atom_pos_cryst
+        }
 
     def solve_phonon_modes(self, force_constants, qpoint):
         """

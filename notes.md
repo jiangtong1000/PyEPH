@@ -1,3 +1,24 @@
+# Electronic band
+The electronic band structure calculation uses Wannier function interpolation to efficiently compute eigenvalues and eigenvectors of the electronic Hamiltonian at arbitrary k-points without expensive DFT calculations.
+
+## Wannier Function Representation
+
+The electronic Hamiltonian in the Wannier basis is:
+$$
+H_k= \sum_R H(R) * e^{ik·R} / w_R
+$$
+
+### Eigenvalue Problem
+
+For each k-point, solve:
+$$
+H_k|\psi_n(k)⟩ = E_n(k)|\psi_n(k)⟩
+$$
+
+where:
+- $E_n(k)$ = Band energies (eigenvalues)
+- $|\psi_n(k)⟩$ = the $n-$th Bloch wavefunctions (eigenvectors)
+
 # Phonon dispersion
 ## Theory and practice
 
@@ -86,6 +107,77 @@ The result gives the desired form:
 $$
 g_{ij}^n(R, R', \mathbf{q}) = g_{ij}^{n}(R_e, \mathbf{q}) \quad \text{where } R = 0, R' = R_e
 $$
+
+## Polar Correction Theory (`dyn_mat_longrange`)
+
+In ionic crystals, the dynamical matrix computed from short-range interatomic force constants (IFCs) alone is incomplete near the Γ point (q → 0). This is because long-range Coulomb interactions between effective charges create additional contributions that decay slowly in real space but have a singular q-dependence in reciprocal space.
+
+The complete dynamical matrix is:
+$$
+D(\mathbf{q}) = D_{\text{short}}(\mathbf{q}) + D_{\text{long}}(\mathbf{q})
+$$
+
+where:
+- $D_{\text{short}}(\mathbf{q})$ comes from short-range IFCs (computed via Fourier transform)
+- $D_{\text{long}}(\mathbf{q})$ is the polar correction for long-range Coulomb interactions
+
+### Long-Range Dynamical Matrix
+
+The polar correction has the analytical form:
+$$
+D_{\text{long},\alpha\beta}^{ab}(\mathbf{q}) = \frac{4\pi e^2}{\Omega} \sum_{\mathbf{G} \neq 0} \frac{Z_{\alpha}^{a*} Z_{\beta}^{b} (\mathbf{q} + \mathbf{G}) \cdot \hat{\mathbf{q}}_\alpha (\mathbf{q} + \mathbf{G}) \cdot \hat{\mathbf{q}}_\beta}{|\mathbf{q} + \mathbf{G}|^2 \epsilon_{\infty,\alpha\beta}} e^{i(\mathbf{q} + \mathbf{G}) \cdot (\boldsymbol{\tau}_a - \boldsymbol{\tau}_b)}
+$$
+
+For practical computation, this is often approximated using the Ewald sum technique or simplified to:
+$$
+D_{\text{long},\alpha\beta}^{ab}(\mathbf{q}) = \frac{4\pi e^2}{\Omega} \frac{Z_{\alpha}^{a*} Z_{\beta}^{b} q_\alpha q_\beta}{|\mathbf{q}|^2 \epsilon_{\infty}} e^{i\mathbf{q} \cdot (\boldsymbol{\tau}_a - \boldsymbol{\tau}_b)} \quad \text{(for small } |\mathbf{q}| \text{)}
+$$
+
+where:
+- $Z_{\alpha}^{a*}$ is the effective charge (Born effective charge) of atom $a$ in direction $\alpha$
+- $\epsilon_{\infty}$ is the high-frequency dielectric constant tensor
+- $\Omega$ is the unit cell volume
+- $\boldsymbol{\tau}_a, \boldsymbol{\tau}_b$ are atomic positions in the unit cell
+- $e$ is the elementary charge
+
+### Implementation Details
+
+The `dyn_mat_longrange` function implements this polar correction by:
+
+1. **Input Parameters**:
+   - **q-point**: $\mathbf{q}$ vector in reciprocal space
+   - **Born effective charges**: $Z^*$ tensor with shape $(N_{\text{at}}, 3, 3)$
+   - **Dielectric tensor**: $\epsilon_{\infty}$ with shape $(3, 3)$
+   - **Atomic positions**: $\boldsymbol{\tau}$ with shape $(N_{\text{at}}, 3)$
+   - **Unit cell volume**: $\Omega$
+
+2. **Algorithm Steps**:
+   - Check if $|\mathbf{q}| \approx 0$ (Γ point singularity handling)
+   - Compute $\mathbf{q} \cdot \epsilon_{\infty}^{-1} \cdot \mathbf{q}$ for denominator
+   - For each atom pair $(a,b)$ and directions $(\alpha,\beta)$:
+     - Calculate phase factor: $e^{i\mathbf{q} \cdot (\boldsymbol{\tau}_a - \boldsymbol{\tau}_b)}$
+     - Compute numerator: $Z_{\alpha}^{a*} Z_{\beta}^{b} q_\alpha q_\beta$
+     - Apply mass normalization: $\frac{1}{\sqrt{M_a M_b}}$
+
+3. **Singularity Treatment at Γ Point**:
+   - For acoustic modes at Γ: enforce acoustic sum rule
+   - For optical modes: use L'Hôpital's rule or analytical limit
+   - Common approach: set small threshold ($|\mathbf{q}| < \epsilon$) and use limiting behavior
+
+### Physical Significance
+
+- **LO-TO Splitting**: Polar correction causes longitudinal optical (LO) and transverse optical (TO) phonon modes to split at the Γ point
+- **Non-Analytical Behavior**: The dynamical matrix becomes direction-dependent as $\mathbf{q} \to 0$:
+  $$
+  \lim_{\mathbf{q} \to 0} D(\mathbf{q}) = D(\hat{\mathbf{q}})
+  $$
+- **Acoustic Sum Rule**: Ensures that acoustic phonon frequencies vanish at Γ point
+
+### Numerical Considerations
+
+- **Convergence**: Ewald parameter must be chosen for optimal real/reciprocal space convergence
+- **Precision**: Near-Γ calculations require careful handling of small denominators
+- **Symmetry**: Must preserve crystal symmetries and satisfy sum rules
 
 ## Physics behind the coding
 `set_cutoff_small` is the cutoff radius in real space for Wigner-Seitz cell vector search (the edge of the first Brillouin zone in reciprocal space), because the Wannier functions are localized in real space, the hopping integrals decay rapidly with the distance, we only need R-vectors within a certain cutoff radius to capture the essential physics. This is done by enumerating the 8 corners of a box in crystal coordinates, and find the maximum distance from the origin (Gamma point) to the corners.

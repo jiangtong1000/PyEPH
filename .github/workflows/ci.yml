@@ -33,7 +33,8 @@ jobs:
       run: |
         cd pyeph/post_qe2pert/test
         python -m pytest test_ph_disp.py::test_phonon_dispersion -v
-    
+        python -m pytest test_electron_band.py::test_electron_bands -v
+
   test-mpi:
     runs-on: ubuntu-latest
     strategy:
