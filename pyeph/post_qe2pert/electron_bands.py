@@ -39,7 +39,7 @@ class ElectronBands(PostQE2Pert):
             hamk: (num_wann, num_wann) complex Hamiltonian matrix at k
         """
         nelem = self.num_wann * (self.num_wann + 1) // 2
-        hamk_upper = np.zeros(nelem, dtype=complex)
+        hamk_upper = np.zeros(nelem, dtype=np.complex128)
         
         m = 0
         for jb in range(self.num_wann):

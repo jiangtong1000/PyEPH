@@ -210,7 +210,7 @@ class PhononDispersion(PostQE2Pert):
                 unique_ph_indices.update(ws_ph_indices)
 
         # Create compact R-vector set and remapping (for memory efficiency)
-        unique_ph_indices = sorted(unique_ph_indices)
+        unique_ph_indices = sorted(unique_ph_indices) #TODO: Tong, test if removing it, what happens?
         rvec_set_ph = rvec_ph_images['vec_cryst'][unique_ph_indices]
         index_mapping = {orig_idx: new_idx for new_idx, orig_idx in enumerate(unique_ph_indices)}
 

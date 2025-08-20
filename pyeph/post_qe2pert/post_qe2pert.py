@@ -149,6 +149,7 @@ class PostQE2Pert():
 
     def get_rvec_set(self):
         """
+        TODO: Tong: this part has some redundancy with the phonon dispersion code
         Perturbo's set_ws_cell_el to get R vector set in crystal coordinates
         Returns:
         rvec_set: unique R vectors (nrvec, 3) in crystal coordinates
