@@ -99,9 +99,11 @@ class CalcEphMatReciprocal(PostQE2Pert):
                 for iw in range(self.num_wann):
                     # Compute phononic WS cell for this matrix element
                     # Between wannier center of iw and atomic position of ia
+                    # wannier_center = self.wannier_center_cryst[iw] if iw <= jw else self.wannier_center_cryst[jw]
+                    wannier_center = self.wannier_center_cryst[iw]
                     ws_ph_indices, _ = self.set_wigner_seitz_cell(
                         self.qc_dim, rvec_ph_images, 
-                        self.wannier_center_cryst[iw], atom_pos_cryst[ia]
+                        wannier_center, atom_pos_cryst[ia]
                     )
                     ws_cells_eph[(iw, jw, ia)] = ws_ph_indices
                     unique_ph_indices.update(ws_ph_indices)
@@ -127,7 +129,8 @@ class CalcEphMatReciprocal(PostQE2Pert):
                     from_key = min(iw, jw)
                     to_key = max(iw, jw)
                     key = (iw, jw, ia)
-                    ws_ph_key = (from_key, to_key, ia)
+                    # ws_ph_key = (from_key, to_key, ia)
+                    ws_ph_key = key
                     ws_ph_indices = ws_cells_eph[ws_ph_key]
                     
                     # Load matrix element from HDF5
@@ -198,7 +201,10 @@ class CalcEphMatReciprocal(PostQE2Pert):
                         # Use rvec_idx (global index) for phase, ir (local index) for g_kerp
                         phase = exp_iqr[rvec_idx]
                         for i in range(3):
-                            gkq_tmp[i] += g_kerp[i, ir, iw, jw, ia] * phase
+                            if iw > jw:
+                                gkq_tmp[i] += g_kerp[i, ir, iw, jw, ia] * phase.conj() # Why???
+                            else:
+                                gkq_tmp[i] += g_kerp[i, ir, iw, jw, ia] * phase
                     
                     # Store in phononic mode index format
                     for i in range(3):
@@ -243,7 +249,7 @@ class CalcEphMatReciprocal(PostQE2Pert):
         
         return gkq
 
-    def calc_ephmat(self, kpoints, qpoints, phfreq_cutoff=0.0):
+    def calc_ephmat(self, kpoints, qpoints, phfreq_cutoff=1.5/ryd_to_mev):
         """
         Args:
             kpoints: array of k-points (nk, 3) in crystal coordinates
@@ -296,8 +302,6 @@ class CalcEphMatReciprocal(PostQE2Pert):
                 
                 # Get e-ph matrix elements in Wannier gauge and Cartesian coords
                 gkq = self.eph_fourier_elph(xq, g_kerp) # TODO: tong, this is different.
-                np.save("gkq.npy", gkq)
-                exit()
 
                 # Transform to phonon modes and Bloch gauge
                 # Could have a sign difference for each elements across different runs, fine
@@ -309,7 +313,7 @@ class CalcEphMatReciprocal(PostQE2Pert):
                 # Compute deformation potential and |g| for each mode
                 dp2 = np.zeros(nmodes)
                 gm2 = np.zeros(nmodes)
-                
+
                 for im in range(nmodes):
                     for jb in range(nbands):
                         for ib in range(nbands):
@@ -317,9 +321,6 @@ class CalcEphMatReciprocal(PostQE2Pert):
                             if wqt[im] > phfreq_cutoff:
                                 gm2[im] += g2[ib, jb, im] * 0.5 / wqt[im]
                 
-                np.save('gm2.npy', gm2)
-                np.save('dp2.npy', dp2)
-                np.save('g2.npy', g2)
 
                 # Handle degenerate phonon modes (average over degenerate modes)
                 im = 0
@@ -338,10 +339,9 @@ class CalcEphMatReciprocal(PostQE2Pert):
                     
                     im = im + i + 1
                 
-                # Store final results
                 for im in range(nmodes):
                     gmod[im, iq, ik] = np.sqrt(gm2[im] / nbands)
-                    dpot[im, iq, ik] = np.sqrt(dp2[im] * tot_mass / nbands)
+                    dpot[im, iq, ik] = np.sqrt(dp2[im] * tot_mass / nbands) # since tot_mass could be big, eg. 1e5, the final uncertainty on g could be different by some small error
                 
 
 
@@ -349,8 +349,8 @@ class CalcEphMatReciprocal(PostQE2Pert):
             'kpoints': kpoints,
             'qpoints': qpoints,
             'phonon_frequencies': wq,
-            'deformation_potential': dpot,
-            'eph_matrix_elements': gmod,
+            'deformation_potential': dpot * ryd_to_ev / bohr_to_ang,  # Convert to eV/Ang
+            'eph_matrix_elements': gmod * ryd_to_mev,
             'phfreq_cutoff': phfreq_cutoff
         }
         self.logger.info("Successfully computed e-ph coupling matrix in all-reciprocal space!")

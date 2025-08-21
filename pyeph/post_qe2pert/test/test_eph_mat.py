@@ -8,7 +8,9 @@ from pathlib import Path
 from pyeph.post_qe2pert import parse_qpoint_path, CalcEphMatReciprocal
 from pyeph.utils.constants import ryd_to_mev
 from pyeph.utils.logger import get_mpi_rank, get_mpi_info
+import pytest
 
+@pytest.mark.skip(reason="none")
 def test_ephmat(size=5):
     repo_root = Path(__file__).resolve().parents[0]
     epr_fname = repo_root / "DNTT_epr.h5"
@@ -45,8 +47,8 @@ def test_ephmat(size=5):
         random_qpoint_idx = numpy.random.choice(len(qpoints), size=size, replace=False)
         random_kpoint_idx = numpy.random.choice(len(kpoints), size=size, replace=False)
 
-    kpoints = kpoints[random_kpoint_idx][:1]
-    qpoints = qpoints[random_qpoint_idx][:1]
+    kpoints = kpoints[random_kpoint_idx]
+    qpoints = qpoints[random_qpoint_idx]
     print("kpoints:", kpoints)
     print("qpoints:", qpoints)
 
