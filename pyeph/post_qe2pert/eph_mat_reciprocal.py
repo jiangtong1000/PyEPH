@@ -251,6 +251,8 @@ class CalcEphMatReciprocal(PostQE2Pert):
 
     def calc_ephmat(self, kpoints, qpoints, phfreq_cutoff=1.5/ryd_to_mev):
         """
+        Compute electron-phonon coupling matrix with MPI support over both k and q points
+        
         Args:
             kpoints: array of k-points (nk, 3) in crystal coordinates
             qpoints: array of q-points (nq, 3) in crystal coordinates
@@ -259,133 +261,170 @@ class CalcEphMatReciprocal(PostQE2Pert):
         Returns:
             results: dict containing computed e-ph quantities
         """
+        from pyeph.utils.logger import get_mpi_info
+        
+        mpi_info = get_mpi_info()
+        rank = mpi_info['rank']
+        nprocs = mpi_info['size']
+        comm = mpi_info['comm']
+        has_mpi = mpi_info['has_mpi']
+        
         nk = len(kpoints)
         nq = len(qpoints)
         nbands = self.num_wann
         nmodes = 3 * self.nat
         tot_mass = np.sum(self.mass)
+        total_kq_pairs = nk * nq
 
         self.logger.info(f"Computing e-ph matrix for {nk} k-points, {nq} q-points, {nbands} bands, {nmodes} modes")
+        self.logger.info(f"Total (k,q) pairs: {total_kq_pairs}")
 
-        # Initialize output arrays
-        dpot = np.zeros((nmodes, nq, nk))  # deformation potential
-        gmod = np.zeros((nmodes, nq, nk))  # |g| matrix elements
-        wq = np.zeros((nmodes, nq))        # phonon frequencies
-        
+        # Create list of all (k,q) pairs with their indices
+        kq_pairs = []
         for ik, xk in enumerate(kpoints):
+            for iq, xq in enumerate(qpoints):
+                kq_pairs.append((ik, iq, xk, xq))
+
+        # Distribute (k,q) pairs across MPI ranks
+        if has_mpi and nprocs > 1:
+            pairs_per_rank, remainder = divmod(total_kq_pairs, nprocs)
+            start_pair = rank * pairs_per_rank + min(rank, remainder)
+            end_pair = start_pair + pairs_per_rank + (1 if rank < remainder else 0)
+            local_kq_pairs = kq_pairs[start_pair:end_pair]
+            self.logger.info(f"MPI enabled: {nprocs} ranks processing {total_kq_pairs} (k,q) pairs total")
+            self.logger.info(f"Rank {rank} is processing {len(local_kq_pairs)} (k,q) pairs")
+        else:
+            local_kq_pairs = kq_pairs
+            self.logger.info(f"Single process mode: processing {total_kq_pairs} (k,q) pairs total")
+
+        # Initialize local storage for results
+        local_results = {}  # Store results by (ik, iq) indices
+
+        # Pre-compute phonon frequencies using existing MPI parallelization
+        wq_full, _ = self.phonon_calc.compute_phonon_dispersion(qpoints, self.force_constants)
+        
+        # Extract frequencies (only rank 0 has full results in MPI mode)
+        if rank == 0 or not has_mpi:
+            wq = wq_full
+        else:
+            wq = None
+        
+        # Broadcast phonon frequencies to all ranks
+        if has_mpi:
+            wq = comm.bcast(wq, root=0)
+        
+        # Process local (k,q) pairs
+        for pair_idx, (ik, iq, xk, xq) in enumerate(local_kq_pairs):
             if self.verbose:
-                self.logger.debug(f"Processing k-point {ik+1}/{nk}: {xk}")
+                self.logger.debug(f"Processing pair {pair_idx+1}/{len(local_kq_pairs)}: k={ik}, q={iq}")
             
-            # Electronic wavefunction at k
-            enk, uk = self.electron_calc.solve_eigenvalue_vector(xk) # uk carry phases
-            # Fourier transform electronic part (bottleneck)
+            xkq = xk + xq
+            
+            # Electronic wavefunctions
+            enk, uk = self.electron_calc.solve_eigenvalue_vector(xk)
+            ekq, ukq = self.electron_calc.solve_eigenvalue_vector(xkq)
+            
+            # Phonon modes at q
+            wqt, mq = self.phonon_calc.solve_phonon_modes(self.force_constants, xq)
+            
+            # Fourier transform electronic part
             g_kerp = self.eph_fourier_el_para(xk)
             
-            # q-point loop
-            for iq, xq in enumerate(qpoints):
-                xkq = xk + xq
-                
-                # Electronic wavefunction at k+q
-                ekq, ukq = self.electron_calc.solve_eigenvalue_vector(xkq)
-                
-                # Phonon frequencies and eigenvectors at q
-                wqt, mq = self.phonon_calc.solve_phonon_modes(self.force_constants, xq)
-
-                np.save("ekq.npy", ekq)
-                np.save("ukq.npy", ukq)
-                np.save('wqt.npy', wqt)
-                np.save('mq.npy', mq)
-
-                # Store phonon frequencies (only once)
-                if ik == 0:
-                    wq[:, iq] = wqt
-                
-                # Get e-ph matrix elements in Wannier gauge and Cartesian coords
-                gkq = self.eph_fourier_elph(xq, g_kerp) # TODO: tong, this is different.
-
-                # Transform to phonon modes and Bloch gauge
-                # Could have a sign difference for each elements across different runs, fine
-                gkq = self.eph_transform(xq, mq, uk, ukq, gkq)
-                
-                # Compute |g|^2
-                g2 = np.abs(gkq)**2
-                
-                # Compute deformation potential and |g| for each mode
-                dp2 = np.zeros(nmodes)
-                gm2 = np.zeros(nmodes)
-
-                for im in range(nmodes):
-                    for jb in range(nbands):
-                        for ib in range(nbands):
-                            dp2[im] += g2[ib, jb, im]
-                            if wqt[im] > phfreq_cutoff:
-                                gm2[im] += g2[ib, jb, im] * 0.5 / wqt[im]
-                
-
-                # Handle degenerate phonon modes (average over degenerate modes)
-                im = 0
-                while im < nmodes:
-                    i = 0
-                    for j in range(im+1, nmodes):
-                        if abs(wqt[j] - wqt[im]) > 1e-12:
-                            break
-                        i += 1
-                    
-                    if i > 0:  # Found degenerate modes
-                        avg_dp2 = np.sum(dp2[im:im+i+1]) / (i+1)
-                        avg_gm2 = np.sum(gm2[im:im+i+1]) / (i+1)
-                        dp2[im:im+i+1] = avg_dp2
-                        gm2[im:im+i+1] = avg_gm2
-                    
-                    im = im + i + 1
-                
-                for im in range(nmodes):
-                    gmod[im, iq, ik] = np.sqrt(gm2[im] / nbands)
-                    dpot[im, iq, ik] = np.sqrt(dp2[im] * tot_mass / nbands) # since tot_mass could be big, eg. 1e5, the final uncertainty on g could be different by some small error
-                
-
-
-        results = {
-            'kpoints': kpoints,
-            'qpoints': qpoints,
-            'phonon_frequencies': wq,
-            'deformation_potential': dpot * ryd_to_ev / bohr_to_ang,  # Convert to eV/Ang
-            'eph_matrix_elements': gmod * ryd_to_mev,
-            'phfreq_cutoff': phfreq_cutoff
-        }
-        self.logger.info("Successfully computed e-ph coupling matrix in all-reciprocal space!")
-        return results
-    
-    def output_ephmat_text(self, results, output_file):
-        """
-        Output e-ph matrix results to text file (original Perturbo format)
-        
-        Args:
-            results: output from calc_ephmat
-            output_file: output filename (.ephmat)
-        """
-        kpoints = results['kpoints']
-        qpoints = results['qpoints']
-        wq = results['phonon_frequencies']
-        dpot = results['deformation_potential']
-        gmod = results['eph_matrix_elements']
-        
-        nk = len(kpoints)
-        nq = len(qpoints)
-        nmodes = wq.shape[0]
-        
-        self.logger.info(f"Writing e-ph matrix results to {output_file}")
-        
-        with open(output_file, 'w') as f:
-            f.write("#  ik      xk     iq      xq   imod    omega(meV)    deform. pot.(eV/A)    |g|(meV)\n")
+            # Get e-ph matrix elements
+            gkq = self.eph_fourier_elph(xq, g_kerp)
             
-            for ik in range(nk):
-                for iq in range(nq):
-                    for im in range(nmodes):
-                        f.write(f"{ik+1:4d} {0.0:9.5f} {iq+1:4d} {0.0:9.5f} {im+1:3d} "
-                               f"{wq[im,iq]*ryd_to_mev:12.6f} "
-                               f"{dpot[im,iq,ik]*ryd_to_ev/bohr_to_ang:22.12E} "
-                               f"{gmod[im,iq,ik]*ryd_to_mev:22.12E}\n")
-                    f.write("  \n")
-        
-        self.logger.info(f"Successfully wrote e-ph matrix results to {output_file}")
+            # Transform to phonon modes and Bloch gauge
+            gkq = self.eph_transform(xq, mq, uk, ukq, gkq)
+            
+            # Compute |g|^2
+            g2 = np.abs(gkq)**2
+
+            # Compute deformation potential and |g| for each mode
+            dp2 = np.zeros(nmodes)
+            gm2 = np.zeros(nmodes)
+
+            for im in range(nmodes):
+                for jb in range(nbands):
+                    for ib in range(nbands):
+                        dp2[im] += g2[ib, jb, im]
+                        if wqt[im] > phfreq_cutoff:
+                            gm2[im] += g2[ib, jb, im] * 0.5 / wqt[im]
+
+            # Handle degenerate phonon modes
+            im = 0
+            while im < nmodes:
+                i = 0
+                for j in range(im+1, nmodes):
+                    if abs(wqt[j] - wqt[im]) > 1e-12:
+                        break
+                    i += 1
+                
+                if i > 0:  # Found degenerate modes
+                    avg_dp2 = np.sum(dp2[im:im+i+1]) / (i+1)
+                    avg_gm2 = np.sum(gm2[im:im+i+1]) / (i+1)
+                    dp2[im:im+i+1] = avg_dp2
+                    gm2[im:im+i+1] = avg_gm2
+                
+                im = im + i + 1
+
+            # Store results for this (k,q) pair
+            gmod_kq = np.zeros(nmodes)
+            dpot_kq = np.zeros(nmodes)
+            for im in range(nmodes):
+                gmod_kq[im] = np.sqrt(gm2[im] / nbands)
+                dpot_kq[im] = np.sqrt(dp2[im] * tot_mass / nbands)
+            
+            local_results[(ik, iq)] = {
+                'gmod': gmod_kq,
+                'dpot': dpot_kq
+            }
+
+        # Gather all results at rank 0
+        if has_mpi and nprocs > 1:
+            all_results = comm.gather(local_results, root=0)
+            
+            if rank == 0:
+                # Merge all local results
+                merged_results = {}
+                for rank_results in all_results:
+                    merged_results.update(rank_results)
+                
+                # Reconstruct full arrays
+                dpot = np.zeros((nmodes, nq, nk))
+                gmod = np.zeros((nmodes, nq, nk))
+                
+                for (ik, iq), data in merged_results.items():
+                    dpot[:, iq, ik] = data['dpot']
+                    gmod[:, iq, ik] = data['gmod']
+                
+                results = {
+                    'kpoints': kpoints,
+                    'qpoints': qpoints,
+                    'phonon_frequencies': wq,
+                    'deformation_potential': dpot * ryd_to_ev / bohr_to_ang,
+                    'eph_matrix_elements': gmod * ryd_to_mev,
+                    'phfreq_cutoff': phfreq_cutoff
+                }
+                self.logger.info("Successfully computed e-ph coupling matrix in all-reciprocal space!")
+                return results
+            else:
+                return None
+        else:
+            # Single process - reconstruct arrays directly
+            dpot = np.zeros((nmodes, nq, nk))
+            gmod = np.zeros((nmodes, nq, nk))
+            
+            for (ik, iq), data in local_results.items():
+                dpot[:, iq, ik] = data['dpot']
+                gmod[:, iq, ik] = data['gmod']
+            
+            results = {
+                'kpoints': kpoints,
+                'qpoints': qpoints,
+                'phonon_frequencies': wq,
+                'deformation_potential': dpot * ryd_to_ev / bohr_to_ang,
+                'eph_matrix_elements': gmod * ryd_to_mev,
+                'phfreq_cutoff': phfreq_cutoff
+            }
+            self.logger.info("Successfully computed e-ph coupling matrix in all-reciprocal space!")
+            return results
