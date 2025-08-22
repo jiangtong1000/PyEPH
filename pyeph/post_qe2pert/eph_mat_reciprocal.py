@@ -145,7 +145,7 @@ class CalcEphMatReciprocal(PostQE2Pert):
                         i_val = group[dset_i][:]
                         ep_hop = r_val + 1j * i_val  # (nrp, nre, 3)
 
-                        if iw > jw: # TODO: tong: this does not matter now because this isn't used. but we ned to think abt this
+                        if iw > jw: # TODO:  tong: I think this is correct, but to be carefully checked.
                             ep_hop = ep_hop.conj()
                         
                         # Verify dimensions match WS cell (using original count before remapping)
