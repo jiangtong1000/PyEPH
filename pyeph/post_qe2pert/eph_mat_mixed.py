@@ -3,7 +3,7 @@ import h5py
 from .post_qe2pert import PostQE2Pert
 from .phonon_disp import PhononDispersion
 from .eph_mat_reciprocal import CalcEphMatReciprocal
-from pyeph.utils.logger import setup_logger
+from pyeph.utils.logger import setup_logger, get_mpi_info
 
 class CalcEphMatMixed(CalcEphMatReciprocal):
     def __init__(self, epr_file, verbose=False):
@@ -33,7 +33,7 @@ class CalcEphMatMixed(CalcEphMatReciprocal):
             assert nrp == len(rp_indices)
             
             # this holds: ep_hop for (iw, jw) is conj of ep_hop at (jw, iw)
-            gmat_raw[iw, jw, ia, :, re_indices, rp_indices] = ep_hop
+            gmat_raw[iw, jw, ia][:, re_indices[:, None], rp_indices] = ep_hop
         return gmat_raw
 
     def calc_ephmat_mixed(self, qpoints):
@@ -60,6 +60,7 @@ class CalcEphMatMixed(CalcEphMatReciprocal):
 
         # (num_wann, num_wann, natoms, 3, nre_vec_tot, nrph_vec_tot)
         gmat_atoms = self.extract_gmat_raw(nre_vec_tot, nrph_vec_tot)
+        phonon_freqs = np.zeros((nmodes, nq), dtype=np.float64)
         
         # these Rq is only for iw <= jw (so we need phase conj for iw>jw later)
         exp_iqr = np.exp(1j * 2.0 * np.pi * self.rvec_set_ph_eph @ qpoints.T) # (nrp, nq)
@@ -70,6 +71,7 @@ class CalcEphMatMixed(CalcEphMatReciprocal):
             
             # Transform the phonon basis (q)
             wqt, mq = self.phonon_calc.solve_phonon_modes(self.force_constants, qpt)
+            phonon_freqs[:, iq] = wqt
             mq = mq.reshape((self.nat, 3, nmodes)) # took care of mass denom
             # (nwan, nwan, nmodes, nre, nrp)
             gmat_modes = np.einsum("ijakep, akn->ijnep", gmat_atoms, mq, optimize=True)
@@ -82,4 +84,6 @@ class CalcEphMatMixed(CalcEphMatReciprocal):
                         gmat[iw, jw, :, :, iq] = np.einsum("nep,p->ne", gmat_modes[iw, jw], phase)
                     else:
                         gmat[iw, jw, :, :, iq] = np.einsum("nep,p->ne", gmat_modes[iw, jw], phase.conj())
-        return gmat
+            
+            gmat = np.einsum("ijnep, n->ijnep", gmat, np.sqrt(0.5 / wqt))
+        return gmat, phonon_freqs, self.rvec_set_el
