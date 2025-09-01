@@ -10,14 +10,18 @@ from pyeph.utils.logger import get_mpi_info, get_mpi_rank, get_mpi_size, get_mpi
 
 
 class PhononDispersion(PostQE2Pert):
-    def __init__(self, epr_file, verbose=False):
+    def __init__(self, epr_file, polar=None, verbose=False):
         super().__init__(epr_file, verbose)
+        self.lpolar = polar
         self.logger = self.logger.getChild("phonon_disp")
         self.setup_polar_correction()
     
     def setup_polar_correction(self):
         with h5py.File(self.epr_file, 'r') as f:
-            self.lpolar = f['basic_data/lpolar'][()] if 'basic_data/lpolar' in f else False
+            if self.lpolar is None:
+                self.lpolar = f['basic_data/lpolar'][()] if 'basic_data/lpolar' in f else False
+            else:
+                assert isinstance(self.lpolar, bool), "polar must be a boolean"
             if self.lpolar:
                 self.logger.info("Polar correction is enabled")
                 self.polar_params = {}
