@@ -83,9 +83,12 @@ class CalcEphMatMixed(CalcEphMatReciprocal):
         local_phonon_freqs = np.zeros((nmodes, local_nq), dtype=np.float64)
 
         # (num_wann, num_wann, natoms, 3, nre_vec_tot, nrph_vec_tot)
+        self.logger.info(f"Extracting raw e-ph matrix elements for {nre_vec_tot} electronic and {nrph_vec_tot} phononic R-vectors")
         gmat_atoms = self.extract_gmat_raw(nre_vec_tot, nrph_vec_tot)
+        self.logger.debug(f"Raw gmat_atoms shape: {gmat_atoms.shape}")
         
         # these Rq is only for iw <= jw (so we need phase conj for iw>jw later)
+        self.logger.debug(f"Computing phase factors for {local_nq} local q-points")
         exp_iqr = np.exp(1j * 2.0 * np.pi * self.rvec_set_ph_eph @ local_qpoints.T) # (nrp, local_nq)
 
         for iq, qpt in enumerate(local_qpoints):
@@ -95,6 +98,7 @@ class CalcEphMatMixed(CalcEphMatReciprocal):
             gmat_atoms_q = np.zeros((self.num_wann, self.num_wann, self.nat, 3, nre_vec_tot), dtype=np.complex128)
             
             # Transform the phonon basis (q)
+            self.logger.debug(f"Solving phonon modes for q-point {iq+1} / {len(local_qpoints)}: {qpt}")
             wqt, mq = self.phonon_calc.solve_phonon_modes(self.force_constants, qpt)
             mq = np.einsum("ij, j->ij", mq, np.sqrt(0.5 / wqt))
             mask = wqt > eps
@@ -117,12 +121,59 @@ class CalcEphMatMixed(CalcEphMatReciprocal):
         
         # Gather results from all ranks
         if has_mpi and nprocs > 1:
-            raise NotImplementedError("MPI is not supported for mixed e-ph matrix")
+            gmat = self._gather_mpi_results(local_gmat, (self.num_wann, self.num_wann, nmodes, nre_vec_tot, nq), comm, rank, nprocs, is_complex=True)
+            phonon_freqs = self._gather_mpi_results(local_phonon_freqs, (nmodes, nq), comm, rank, nprocs, is_complex=False)
+            if rank != 0:
+                # Non-root ranks don't have complete data
+                return None, None, None, None
         else:
             gmat = local_gmat
             phonon_freqs = local_phonon_freqs
         
         return gmat, phonon_freqs, self.rvec_set_el, self.rvec_set_ph_eph
+    
+    def _gather_mpi_results(self, local_data, global_shape, comm, rank, nprocs, is_complex=False):
+        """
+        Gather results from all MPI ranks for mixed e-ph matrix calculations.
+        
+        Args:
+            local_data: Local data array from current rank
+            global_shape: Shape of the global result array  
+            comm: MPI communicator
+            rank: Current MPI rank
+            nprocs: Number of MPI processes
+            is_complex: Whether data is complex
+            
+        Returns:
+            Gathered data array on rank 0, local_data on other ranks
+        """
+        if rank == 0:
+            # Allocate global array
+            dtype = local_data.dtype if is_complex else np.float64
+            global_data = np.zeros(global_shape, dtype=dtype)
+            
+            # Determine q-point distribution
+            nq = global_shape[-1]  # q-points are always the last dimension
+            
+            # Place rank 0's data first
+            qpts_per_rank, remainder = divmod(nq, nprocs)
+            start = 0
+            end = qpts_per_rank + (1 if remainder > 0 else 0)
+            global_data[..., start:end] = local_data
+            
+            # Receive data from other ranks
+            for source_rank in range(1, nprocs):
+                start = source_rank * qpts_per_rank + min(source_rank, remainder)
+                end = start + qpts_per_rank + (1 if source_rank < remainder else 0)
+                
+                received_data = comm.recv(source=source_rank, tag=source_rank)
+                global_data[..., start:end] = received_data
+            
+            return global_data
+        else:
+            # Send local data to rank 0
+            comm.send(local_data, dest=0, tag=rank)
+            return None
     
     def ifft_to_real_space(self, gmat, qpoints):
         """
@@ -130,7 +181,9 @@ class CalcEphMatMixed(CalcEphMatReciprocal):
         qpoints (nq, 3)
         return gmat_real (num_wann, num_wann, nmodes, nre_vec_tot, nph_vec_tot)
         """
-        
+        self.logger.info(f"Converting e-ph matrix from reciprocal space to real space")
+        self.logger.debug(f"gmat shape: {gmat.shape}")
+        self.logger.debug(f"qpoints shape: {qpoints.shape}")
         nq = len(qpoints)
         nmodes = 3 * self.nat
         nre_vec_tot = len(self.rvec_set_el)
