@@ -3,13 +3,25 @@ import h5py
 from .post_qe2pert import PostQE2Pert
 from .phonon_disp import PhononDispersion
 from .eph_mat_reciprocal import CalcEphMatReciprocal
+from .electron_bands import ElectronBands
 from pyeph.utils.logger import setup_logger, get_mpi_info
 
 class CalcEphMatMixed(CalcEphMatReciprocal):
     def __init__(self, epr_file, polar=False, verbose=False):
-        super().__init__(epr_file, verbose)
+        PostQE2Pert.__init__(self, epr_file, verbose)
         self.logger = setup_logger("calc_eph_mat_mixed", level="DEBUG" if verbose else "INFO")
-        self.phonon_calc = PhononDispersion(epr_file, polar, verbose)
+        
+        # Initialize phonon and electron calculations
+        self.phonon_calc = PhononDispersion(epr_file, polar=polar, verbose=verbose)
+        self.electron_calc = ElectronBands(epr_file, verbose=verbose)
+        
+        # Extract e-ph matrix elements and setup
+        self.rvec_set_el, self.ham_r_info = self.get_rvec_set()
+        self.force_constants = self.phonon_calc.extract_force_constants()
+        self.eph_matrix_elements = self.extract_eph_in_real_space_with_ws(self.ham_r_info)
+        
+        self.logger.info(f"Initialized with {len(self.rvec_set_el)} electron R-vectors, "
+                        f"{len(self.rvec_set_ph_eph)} phonon R-vectors")
     
     def extract_gmat_raw(self, nre_vec_tot, nrph_vec_tot):
         """
