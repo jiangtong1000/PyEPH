@@ -1,10 +1,10 @@
 import numpy as np
-import h5py
 from .post_qe2pert import PostQE2Pert
 from .phonon_disp import PhononDispersion
 from .eph_mat_reciprocal import CalcEphMatReciprocal
 from .electron_bands import ElectronBands
 from pyeph.utils.logger import setup_logger, get_mpi_info
+from pyeph.utils.constants import ryd_to_mev
 
 class CalcEphMatMixed(CalcEphMatReciprocal):
     def __init__(self, epr_file, polar=False, verbose=False):
@@ -31,7 +31,9 @@ class CalcEphMatMixed(CalcEphMatReciprocal):
         gmat_raw = np.zeros((self.num_wann, self.num_wann, self.nat, 3, nre_vec_tot, nrph_vec_tot), dtype=np.complex128)
         for key, ephmat in self.eph_matrix_elements.items():
             iw, jw, ia = key
-            ep_hop = ephmat['ep_hop']
+            if iw > jw:
+                continue
+            ep_hop = ephmat['ep_hop'] # (nrp, nre, 3)
             nrp, nre, _ = ep_hop.shape
             ep_hop = ep_hop.transpose(2, 1, 0) # (3, nre, nrp)
             
@@ -45,10 +47,17 @@ class CalcEphMatMixed(CalcEphMatReciprocal):
             assert nrp == len(rp_indices)
             
             # this holds: ep_hop for (iw, jw) is conj of ep_hop at (jw, iw)
-            gmat_raw[iw, jw, ia][:, re_indices[:, None], rp_indices] = ep_hop
+            # gmat_raw[iw, jw, ia][:, re_indices[:, None], rp_indices] = ep_hop
+            
+            # let's do this carefully for now, and we can optimize later
+            for re_idx in range(nre):
+                for rp_idx in range(nrp):
+                    for i in range(3):
+                        gmat_raw[iw, jw, ia, i, re_indices[re_idx], rp_indices[rp_idx]] = ep_hop[i, re_idx, rp_idx]
+        
         return gmat_raw
 
-    def calc_ephmat_mixed(self, qpoints, eps=1e-5):
+    def calc_ephmat_mixed(self, qpoints, phfreq_cutoff=1.5/ryd_to_mev):
         """
         Compute e-ph coupling matrix in mixed real-reciprocal space representation with MPI support.
         Electronics in real space (R_e), phonons in reciprocal space (q).
@@ -112,21 +121,21 @@ class CalcEphMatMixed(CalcEphMatReciprocal):
             # Transform the phonon basis (q)
             self.logger.debug(f"Solving phonon modes for q-point {iq+1} / {len(local_qpoints)}: {qpt}")
             wqt, mq = self.phonon_calc.solve_phonon_modes(self.force_constants, qpt)
+            mq[:, wqt < phfreq_cutoff] = 0
+            wqt[wqt < phfreq_cutoff] = phfreq_cutoff # these part will never be used anyway
             mq = np.einsum("ij, j->ij", mq, np.sqrt(0.5 / wqt))
-            mask = wqt > eps
+            
             local_phonon_freqs[:, iq] = wqt
-            mq = mq.reshape((self.nat, 3, nmodes)) # took care of mass denom
             
             phase = exp_iqr[:, iq]
-            for iw in range(self.num_wann):
-                for jw in range(self.num_wann):
-                    if iw <= jw:
-                        gmat_atoms_q[iw, jw] = np.einsum("akep, p->ake", gmat_atoms[iw, jw], phase)
-                    else:
-                        gmat_atoms_q[iw, jw] = np.einsum("akep, p->ake", gmat_atoms[iw, jw], phase.conj())
-            
+            for jw in range(self.num_wann):
+                for iw in range(jw + 1):
+                    gmat_atoms_q[iw, jw] = np.einsum("akep, p->ake", gmat_atoms[iw, jw], phase)
+                    ## else:
+                    ## gmat_atoms_q[iw, jw] = np.einsum("akep, p->ake", gmat_atoms[iw, jw], phase.conj())
+            gmat_atoms_q = gmat_atoms_q.reshape((self.num_wann, self.num_wann, self.nat * 3, nre_vec_tot))
             # (nwan, nwan, nmodes, nre, nq)
-            local_gmat[:, :, :, :, iq] = np.einsum("ijake, akn->ijne", gmat_atoms_q, mq, optimize=True)
+            local_gmat[:, :, :, :, iq] = np.einsum("ijme, mn->ijne", gmat_atoms_q, mq, optimize=True)
             
             if (iq + 1) % 100 == 0:
                 self.logger.debug(f"Completed {iq + 1}/{local_nq} local q-points")
@@ -186,8 +195,8 @@ class CalcEphMatMixed(CalcEphMatReciprocal):
             # Send local data to rank 0
             comm.send(local_data, dest=0, tag=rank)
             return None
-    
-    def ifft_to_real_space(self, gmat, qpoints):
+        
+    def ifft_to_real_space(self, gmat, qpoints, rph):
         """
         gmat (num_wann, num_wann, nmodes, nre_vec_tot, nq)
         qpoints (nq, 3)
@@ -196,16 +205,14 @@ class CalcEphMatMixed(CalcEphMatReciprocal):
         self.logger.info(f"Converting e-ph matrix from reciprocal space to real space")
         self.logger.debug(f"gmat shape: {gmat.shape}")
         self.logger.debug(f"qpoints shape: {qpoints.shape}")
-        nq = len(qpoints)
         nmodes = 3 * self.nat
         nre_vec_tot = len(self.rvec_set_el)
-        nrph_vec_tot = len(self.rvec_set_ph_eph)
-        exp_iqr = np.exp(-1j * 2.0 * np.pi * self.rvec_set_ph_eph @ qpoints.T) # (nrp, nq)
+        nrph_vec_tot = len(rph)
+        exp_iqr = np.exp(-1j * 2.0 * np.pi * rph @ qpoints.T) # (nrp, nq)
         gmat_real = np.zeros((self.num_wann, self.num_wann, nmodes, nre_vec_tot, nrph_vec_tot), dtype=np.complex128)
-        for iw in range(self.num_wann):
-            for jw in range(self.num_wann):
-                if iw <= jw:
-                    gmat_real[iw, jw, :, :, :] = np.einsum("neq, pq->nep", gmat[iw, jw], exp_iqr)
-                else:
-                    gmat_real[iw, jw, :, :, :] = np.einsum("neq, pq->nep", gmat[iw, jw], exp_iqr.conj())
-        return gmat_real / nq
+        for jw in range(self.num_wann):
+            for iw in range(jw + 1):
+                gmat_real[iw, jw, :, :, :] = np.einsum("neq, pq->nep", gmat[iw, jw], exp_iqr)
+                # else:
+                    # gmat_real[iw, jw, :, :, :] = np.einsum("neq, pq->nep", gmat[iw, jw], exp_iqr.conj())
+        return gmat_real

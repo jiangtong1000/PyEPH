@@ -322,12 +322,14 @@ class PhononDispersion(PostQE2Pert):
         dyn_matrix = unpack_dyn_matrix(dyn_upper, nmodes)
         eigenvalues, eigenvectors = scipy.linalg.eigh(dyn_matrix)
         
+        # orthogonality check
+        assert np.allclose(np.dot(eigenvectors, eigenvectors.T.conj()), np.eye(nmodes))
         # Compute frequencies with proper handling of negative eigenvalues
         frequencies = np.sign(eigenvalues) * np.sqrt(np.abs(eigenvalues))
         
         # Normalize eigenvectors by mass
         mass_sqrt_inv = np.repeat(1.0 / np.sqrt(masses), 3)
-        modes = eigenvectors * mass_sqrt_inv[:, np.newaxis]
+        modes = np.einsum("ij, i->ij", eigenvectors, mass_sqrt_inv)
         
         return frequencies, modes
 
