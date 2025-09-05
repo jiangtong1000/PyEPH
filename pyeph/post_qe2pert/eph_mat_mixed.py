@@ -55,6 +55,8 @@ class CalcEphMatMixed(CalcEphMatReciprocal):
                     for i in range(3):
                         gmat_raw[iw, jw, ia, i, re_indices[re_idx], rp_indices[rp_idx]] = ep_hop[i, re_idx, rp_idx]
         
+        assert np.allclose(gmat_raw.imag, 0)
+        gmat_raw = gmat_raw.real
         return gmat_raw
 
     def calc_ephmat_mixed(self, qpoints, phfreq_cutoff=1.5/ryd_to_mev):
