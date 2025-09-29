@@ -29,7 +29,7 @@ if rank == 0:
     gmat_full[..., :len(half_qgrids)] = gmat_half
     phonon_freqs_full[..., :len(half_qgrids)] = phonon_freqs_half
     for iq_minus, iq_half_partner in enumerate(partner_qgrids_idx):
-        gmat_full[..., len(half_qgrids) + iq_minus] = gmat_half[..., iq_half_partner]
+        gmat_full[..., len(half_qgrids) + iq_minus] = gmat_half[..., iq_half_partner].conj()
         phonon_freqs_full[..., len(half_qgrids) + iq_minus] = phonon_freqs_half[..., iq_half_partner]
 
     with h5py.File(f"gmat_{Nx}_{Ny}.h5", "w") as f:

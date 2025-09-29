@@ -10,7 +10,7 @@ from pyeph.utils.logger import get_mpi_info, get_mpi_rank, get_mpi_size, get_mpi
 
 
 class PhononDispersion(PostQE2Pert):
-    def __init__(self, epr_file, polar=None, verbose=False):
+    def __init__(self, epr_file, polar=False, verbose=False):
         super().__init__(epr_file, verbose)
         self.lpolar = polar
         self.logger = self.logger.getChild("phonon_disp")
@@ -255,7 +255,7 @@ class PhononDispersion(PostQE2Pert):
             'atom_pos_cryst': atom_pos_cryst
         }
 
-    def solve_phonon_modes(self, force_constants, qpoint):
+    def solve_phonon_modes(self, force_constants, qpoint, mass_weight=True):
         """
         Solve phonon eigenvalue problem at a specific q-point
         Following Perturbo's solve_phonon_modes
@@ -328,12 +328,13 @@ class PhononDispersion(PostQE2Pert):
         frequencies = np.sign(eigenvalues) * np.sqrt(np.abs(eigenvalues))
         
         # Normalize eigenvectors by mass
-        mass_sqrt_inv = np.repeat(1.0 / np.sqrt(masses), 3)
-        modes = np.einsum("ij, i->ij", eigenvectors, mass_sqrt_inv)
+        if mass_weight:
+            mass_sqrt_inv = np.repeat(1.0 / np.sqrt(masses), 3)
+            eigenvectors = np.einsum("ij, i->ij", eigenvectors, mass_sqrt_inv)
         
-        return frequencies, modes
+        return frequencies, eigenvectors
 
-    def compute_phonon_dispersion(self, qpath, force_constants):
+    def compute_phonon_dispersion(self, qpath, force_constants, mass_weight=True):
         """
         Compute phonon dispersion along a q-path with MPI support
         
@@ -374,7 +375,7 @@ class PhononDispersion(PostQE2Pert):
         
         self.logger.info(f"Computing phonon dispersion for {local_nq} q-points...")
         for iq, qpoint in enumerate(local_qpoints):
-            freq, mode = self.solve_phonon_modes(force_constants, qpoint)
+            freq, mode = self.solve_phonon_modes(force_constants, qpoint, mass_weight=mass_weight)
             local_frequencies[iq] = freq
             local_modes[iq] = mode
             
