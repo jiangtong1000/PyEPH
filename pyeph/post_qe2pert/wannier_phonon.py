@@ -5,7 +5,7 @@ functional to find the best gauge for localizing the phonon modes.
 import jax
 import jax.numpy as jnp
 import jax.scipy.linalg as jsp_linalg
-import numpy, h5py
+import numpy, h5py, scipy
 from pyeph.utils.grid import generate_half_qgrids, rgrid_2d_full
 from pyeph.lib.setup_jax import configure_jax_backend
 configure_jax_backend(verbose=True)
@@ -16,31 +16,38 @@ configure_jax_backend(verbose=True)
 # 3. Riemannian optimizer to replace expm
 # 4. After convergence, round l to nearest integer (Holstein, SSH)
 
+def assert_trs(modes_all, q_hbz, q_minus, partner_hbz_for_minus):
+    assert len(q_minus) == len(partner_hbz_for_minus)
+    assert len(q_hbz) + len(q_minus) == len(modes_all)
+    for iqm, minus_q in enumerate(partner_hbz_for_minus):
+        assert minus_q < len(q_hbz)
+        assert jnp.allclose(modes_all[iqm+len(q_hbz)], modes_all[minus_q].conj())
+
+def base_gauge_with_proskrutes(modes_hbz, hbz_qgrids):
+    nmodes = modes_hbz.shape[-1]
+    nq_hbz = len(hbz_qgrids)
+    base = numpy.zeros((nq_hbz, nmodes, nmodes), dtype=numpy.complex128)
+    modes_ref = modes_hbz[0]  # sould be Gamma? not required?
+
+    for iq in range(nq_hbz):
+        overlap = modes_hbz[iq].conj().T @ modes_ref
+        u, _, vh = scipy.linalg.svd(overlap, full_matrices=False, lapack_driver="gesvd")
+        base[iq] = u @ vh
+    return jnp.asarray(base)
 
 def trs_grid(Nx, Ny):
     q_hbz, q_minus, q_full, partner_hbz_for_minus = generate_half_qgrids(Nx, Ny)
     return q_hbz, q_minus, q_full, partner_hbz_for_minus, rgrid_2d_full(Nx, Ny)
 
-def _params_to_unitary(params_hbz, q_minus, partner_hbz_for_minus):
-    """
-    Expand HBZ params to full-BZ with TRS: params_full = [params_hbz, params_hbz[partner]^*],
-    then exp(skew-Hermitian) per q to get a unitary gauge for all q.
-    """
-    params_hbz = jnp.asarray(params_hbz, dtype=jnp.complex128)
-    partner_hbz_for_minus = jnp.asarray(partner_hbz_for_minus, dtype=jnp.int32)
-    n_hbz, n_modes, _ = params_hbz.shape
-    n_minus = len(q_minus)
-    n_full  = n_hbz + n_minus
+def _params_to_unitary(params_hbz, U_base, partner_hbz_for_minus):
+    params_hbz = jnp.asarray(params_hbz, jnp.complex128)
+    U_base = jnp.asarray(U_base, jnp.complex128)
+    skew = 0.5 * (params_hbz - jnp.swapaxes(params_hbz.conj(), -1, -2))
+    U_delta = jax.vmap(jsp_linalg.expm)(skew)
+    U_hbz = jnp.einsum("qij,qjk->qik", U_base, U_delta)
+    U_minus = jnp.conj(U_hbz[partner_hbz_for_minus])
+    return jnp.concatenate([U_hbz, U_minus], axis=0)
 
-    # Build full params with TRS conjugation
-    params_full = jnp.zeros((n_full, n_modes, n_modes), dtype=jnp.complex128)
-    params_full = params_full.at[:n_hbz].set(params_hbz)
-    params_full = params_full.at[n_hbz:].set(params_hbz[partner_hbz_for_minus].conj())
-
-    # Project to skew-Hermitian and exponentiate -> unitary
-    skew_full = 0.5 * (params_full - jnp.swapaxes(params_full.conj(), -1, -2))
-    U_full = jax.vmap(jsp_linalg.expm)(skew_full)
-    return U_full
 
 def compute_wannier_amplitudes(
     eigenvectors,
@@ -150,11 +157,14 @@ def minimize_wannier_spread(
     q_vecs = jnp.asarray(q_vectors, dtype=jnp.float64)
     delta_r = jnp.asarray(delta_r_vectors, dtype=jnp.float64)
     masses = jnp.asarray(masses, dtype=jnp.float64)
+    partner_hbz_for_minus = jnp.asarray(partner_hbz_for_minus, dtype=jnp.int32)
+    assert_trs(eigenvectors, q_hbz, q_minus, partner_hbz_for_minus)
 
     n_modes = eigvecs.shape[-1]
+    U_base_gauge = base_gauge_with_proskrutes(eigenvectors[:len(q_hbz)], q_hbz)
     
     if initial_params is None:
-        params = jnp.zeros((len(q_hbz), n_modes, n_modes), dtype=jnp.complex128)
+        params = numpy.zeros((len(q_hbz), n_modes, n_modes), dtype=numpy.complex128)
     else:
         params = jnp.asarray(initial_params, dtype=jnp.complex128)
         if params.shape != (len(q_hbz), n_modes, n_modes):
@@ -163,7 +173,7 @@ def minimize_wannier_spread(
     learning_rate = jnp.asarray(learning_rate, dtype=jnp.float64)
 
     def objective(param_array):
-        gauge = _params_to_unitary(param_array, q_minus, partner_hbz_for_minus)
+        gauge = _params_to_unitary(param_array, U_base_gauge, partner_hbz_for_minus)
         rho = compute_wannier_amplitudes(
             eigvecs,
             q_vecs,
@@ -211,8 +221,9 @@ def minimize_wannier_spread(
         if abs(prev_loss - loss_real) < tol:
             break
         prev_loss = loss_real
+        grad = 0.5 * (grad - jnp.swapaxes(grad.conj(), -1, -2))
         params = params - learning_rate * grad
 
-    gauge_opt = _params_to_unitary(best_params, q_minus, partner_hbz_for_minus)
+    gauge_opt = _params_to_unitary(best_params, U_base_gauge, partner_hbz_for_minus)
     loss_track = jnp.asarray(loss_track, dtype=jnp.float64)
     return gauge_opt, loss_track, rho_track
