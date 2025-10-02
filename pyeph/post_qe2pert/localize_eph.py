@@ -114,22 +114,28 @@ def compute_eph_mat_real_space(
         phases_hbz = jnp.exp(1j * param_array)
         phases_minus = jnp.conj(phases_hbz[partner_hbz_for_minus])
         return jnp.concatenate([phases_hbz, phases_minus], axis=0)
-
-    def objective(param_array):
+    
+    def compute_eph_real(param_array):
         phase_factors = build_phase_factors(param_array)
         rotated_eigvecs = jnp.einsum("qvu, qu, v, qu->qvu", eigvecs, phase_factors, sqrt_mass_per_component, inv_sqrt_freqs)
         eph_real = jnp.zeros((nband, nband, nre_ws, n_delta_r, nmodes), dtype=jnp.complex128)
+        # only track the upper triangle since the e-ph matrix is symmetric
         for jw in range(nband):
             for iw in range(jw + 1):
                 eph_mixed = jnp.einsum("veq, qvu->euq", eph_raw_rot[iw, jw], rotated_eigvecs)
                 block = jnp.einsum("euq, rq->eru", eph_mixed, exp_iq_delta_r)
                 eph_real = eph_real.at[iw, jw].set(block)
-
-        eph_real = jnp.abs(eph_real)
-        metric = -jnp.sum(eph_real)
-        return metric, eph_real
-
-    value_and_grad = jax.jit(jax.value_and_grad(objective, has_aux=True))
+        return eph_real
+    
+    def objective(param_array):
+        eph_real = compute_eph_real(param_array)
+        metric = -jnp.sum(jnp.abs(eph_real))
+        return metric
+    
+    @jax.jit
+    def grad_function(param_array):
+        grad = jax.grad(objective)(param_array)
+        return grad
 
     metric_history = []
     best_metric = float("inf")
@@ -137,7 +143,12 @@ def compute_eph_mat_real_space(
     prev_metric = float("inf")
     
     for _ in range(max_iter):
-        (metric, eph_real), grad = value_and_grad(params_hbz)
+        grad = grad_function(params_hbz)
+        params_hbz = params_hbz - learning_rate * grad
+        metric = objective(params_hbz)
+        if abs(prev_metric - metric) < tol:
+            break
+        prev_metric = metric
         print(f"Metric: {metric:.6e}")
         metric_history.append(metric)
 
@@ -148,16 +159,12 @@ def compute_eph_mat_real_space(
                 if "eph_real" in f:
                     del f["eph_real"]
                     del f["best_phase_factors"]
+                eph_real = compute_eph_real(best_params)
                 best_phase_factors = build_phase_factors(best_params)
                 f.create_dataset("best_phase_factors", data=best_phase_factors)
                 f.create_dataset("eph_real", data=eph_real)
 
-        if abs(prev_metric - metric) < tol:
-            break
-        prev_metric = metric
-        params_hbz = params_hbz - learning_rate * grad
-
-    _, best_eph_real = objective(best_params)
+    best_eph_real = compute_eph_real(best_params)
     best_phase_factors = build_phase_factors(best_params)
     metric_history = jnp.asarray(metric_history, dtype=jnp.float64)
     return best_eph_real, best_phase_factors, metric_history

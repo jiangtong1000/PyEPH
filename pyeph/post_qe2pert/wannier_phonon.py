@@ -16,6 +16,9 @@ from pyeph.lib.setup_jax import configure_jax_backend
 # 4. After convergence, round l to nearest integer (Holstein, SSH)
 
 def assert_trs(modes_all, q_hbz, q_minus, partner_hbz_for_minus):
+    for iq in range(len(q_hbz)):
+        assert numpy.allclose(modes_all[iq].conj().T @ modes_all[iq], numpy.eye(modes_all.shape[-1]))
+        assert numpy.allclose(modes_all[iq] @ modes_all[iq].conj().T, numpy.eye(modes_all.shape[-1]))
     assert len(q_minus) == len(partner_hbz_for_minus)
     assert len(q_hbz) + len(q_minus) == len(modes_all)
     for iqm, minus_q in enumerate(partner_hbz_for_minus):
@@ -154,13 +157,13 @@ def minimize_wannier_spread(
     """
 
     configure_jax_backend(verbose=True)
+    assert_trs(eigenvectors, q_hbz, q_minus, partner_hbz_for_minus)
 
     eigvecs = jnp.asarray(eigenvectors, dtype=jnp.complex128)
     q_vecs = jnp.asarray(q_vectors, dtype=jnp.float64)
     delta_r = jnp.asarray(delta_r_vectors, dtype=jnp.float64)
     masses = jnp.asarray(masses, dtype=jnp.float64)
     partner_hbz_for_minus = jnp.asarray(partner_hbz_for_minus, dtype=jnp.int32)
-    assert_trs(eigenvectors, q_hbz, q_minus, partner_hbz_for_minus)
 
     n_modes = eigvecs.shape[-1]
     U_base_gauge = base_gauge_with_proskrutes(eigenvectors[:len(q_hbz)], q_hbz)
