@@ -3,31 +3,19 @@ import jax.numpy as jnp
 import numpy
 import numpy as np
 import h5py
-import os
+from typing import Dict, Optional
+
+from pyqcpbc.OPT import objective_function as qcpbc_objective
+from pyqcpbc.OPT import minimizer as qcpbc_minimizer
 
 from pyeph.post_qe2pert.wannier_phonon import assert_trs
 from pyeph.utils.constants import ryd_to_mev
 from pyeph.lib.setup_jax import configure_jax_backend
+from pyeph.post_qe2pert.localize_eph import zero_out_negative_freqs, compute_density
+
 configure_jax_backend()
 
-def zero_out_negative_freqs(freqs, eigvecs, phfreq_cutoff):
-    """
-    Zero out negative frequencies and eigenvectors.
-    """
-    for iq in range(eigvecs.shape[0]):
-        mask = freqs[iq] < phfreq_cutoff
-        eigvecs[iq, :, mask] = 0.0
-        freqs[iq, mask] = phfreq_cutoff
-    return eigvecs, freqs
-
-def compute_density(eph_real, delta_r_vectors):
-    g2 = jnp.abs(eph_real) ** 2
-    g2_r = jnp.sum(g2, axis=(0, 1, 2, 4))
-    p = g2_r / jnp.sum(g2_r)
-    r = jnp.linalg.norm(delta_r_vectors, axis=1)
-    return p, r
-
-def compute_eph_mat_real_space(
+def compute_eph_mat_real_space_pyqcpbc(
     eigvecs,
     freqs,
     masses,
@@ -38,33 +26,12 @@ def compute_eph_mat_real_space(
     q_minus,
     partner_hbz_for_minus,
     fname,
-    phfreq_cutoff=1.5/ryd_to_mev,
-    max_iter = 500,
-    tol = 1e-9
+    phfreq_cutoff=1.5 / ryd_to_mev,
+    max_iter=200,
+    tol=1e-9,
+    algorithm="l_bfgs_ls"
 ):
-    """
-    Localize the e-ph matrix in real space by optimizing per-mode phase factors.
-
-    Args:
-        eigvecs: (nq, nmodes, nmodes), phonon eigenvectors (unweighted).
-        freqs: (nq, nmodes), phonon frequencies.
-        masses: (natom,), atomic masses.
-        eph_raw: (nband, nband, natom, 3, nre, nq), raw e-ph matrix.
-        rph: (nrph, 3), Wigner-Seitz lattice vectors for phonon modes.
-        delta_r_vectors: (n_delta_r, 3), delta_r vectors over which to maximize.
-        q_hbz: (nq_hbz, 3), half-Brillouin zone q-points.
-        q_minus: (nq_minus, 3), minus-BZ q-points.
-        partner_hbz_for_minus: (nq_minus,), partner index for minus-BZ q-points.
-        fname: file name to save the results.
-        phfreq_cutoff: phonon frequency cutoff.
-        max_iter: maximum number of iterations.
-        tol: tolerance for the convergence.
-
-    Returns:
-        best_eph_real: (nband, nband, nre, n_delta_r, nmodes), localized e-ph matrix.
-        best_gauge: (nq, nmodes, nmodes), diagonal phase gauge matrices.
-        metric_history: (n_steps,), convergence history of the localization metric.
-    """
+    """Localize e-ph matrix elements by minimizing their spatial spread using pyqcpbc."""
     (nband, _, natom, _, nre_ws, nrph_ws) = eph_raw.shape
     assert_trs(eigvecs, q_hbz, q_minus, partner_hbz_for_minus)
     
@@ -151,42 +118,77 @@ def compute_eph_mat_real_space(
     def grad_function(param_array):
         grad = jax.grad(objective)(param_array)
         return grad
-
-    metric_history = []
-    best_metric = float("inf")
-    best_params = params_hbz
-    prev_metric = float("inf")
     
-    for _ in range(max_iter):
-        grad = grad_function(params_hbz)
-        params_hbz = params_hbz - learning_rate * grad
-        metric = objective(params_hbz)
-        if abs(prev_metric - metric) < tol:
-            break
-        prev_metric = metric
-        print(f"Metric: {metric:.6e}")
-        metric_history.append(metric)
+    def _pack_params(array):
+        return np.asarray(array, dtype=np.float64).ravel()
+    
+    params_shape = params_hbz.shape
+    def _unpack_params(vector):
+        return jnp.asarray(vector.reshape(params_shape), dtype=jnp.float64)
 
-        if metric < best_metric:
-            best_metric = metric
-            best_params = params_hbz
-            with h5py.File(fname, "a") as f:
-                if "eph_real" in f:
-                    del f["eph_real"]
-                    del f["best_phase_factors"]
-                    del f["best_p"]
-                eph_real = compute_eph_real(best_params)
-                assert jnp.allclose(eph_real.imag, 0.0), "Imaginary part should be zero"
-                print('eph_real are all real')
-                assert jnp.allclose(jnp.sum(eph_real**2, axis=3), total_g2), "Total g2 should be conserved"
-                print('total g2 is conserved')
-                p, r = compute_density(eph_real, delta_r_vectors)
-                best_phase_factors = build_phase_factors(best_params)
-                f.create_dataset("best_phase_factors", data=best_phase_factors)
-                f.create_dataset("eph_real", data=eph_real)
-                f.create_dataset("best_p", data=p)
+    class PhononLocalizationObjective(qcpbc_objective):
+        def __init__(self, initial_params_vec):
+            super().__init__(initial_params_vec.size)
+            self.params_vec = initial_params_vec.copy()
+            self._origin_vec = self.params_vec.copy()
+            self._current_value = None
+            self._current_grad = None
+            self._best_value = np.inf
+            self._best_params_vec = self.params_vec.copy()
 
-    best_eph_real = compute_eph_real(best_params)
-    best_phase_factors = build_phase_factors(best_params)
-    metric_history = jnp.asarray(metric_history, dtype=jnp.float64)
-    return best_eph_real, best_phase_factors, metric_history
+        def _evaluate(self):
+            params = _unpack_params(self.params_vec)
+            grad = grad_function(params)
+            value = objective(params)
+            grad_vec = np.asarray(grad).reshape(-1)
+            self._current_value = value
+            self._current_grad = grad_vec
+            if value < self._best_value:
+                self._best_value = value
+                self._best_params_vec = self.params_vec.copy()
+                with h5py.File(fname, "a") as f:
+                    eph_real = compute_eph_real(params)
+                    best_p, _ = compute_density(eph_real, delta_r_vectors)
+                    if "best_p" in f:
+                        del f["best_p"]
+                        del f['eph_real']
+                    f.create_dataset("best_p", data=best_p)
+                    f.create_dataset("eph_real", data=eph_real)
+                    
+        def get_value(self):
+            self._evaluate()
+            return self._current_value
+
+        def grad(self):
+            self._evaluate()
+            return self._current_grad
+
+        def precond(self, x, shift):
+            return x
+
+        def update_params(self, step):
+            self.params_vec = self.params_vec + step.ravel()
+
+        def save_new_origin(self):
+            self._origin_vec = self.params_vec.copy()
+
+        def back_to_origin(self):
+            self.params_vec = self._origin_vec.copy()
+
+        @property
+        def best_params_vec(self):
+            return self._best_params_vec
+
+        @property
+        def best_value(self):
+            return self._best_value
+
+    initial_vec = _pack_params(params_hbz)
+    objective_wrapper = PhononLocalizationObjective(initial_vec)
+    _ = objective_wrapper.get_value()
+
+    solver = qcpbc_minimizer()
+    solver.cfg("algorithm", algorithm)
+    solver.cfg("maxiter", int(max_iter))
+    solver.cfg("tol", float(tol))
+    solver.run(objective_wrapper)
