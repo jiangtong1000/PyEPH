@@ -61,7 +61,6 @@ def compute_eph_mat_real_space_pyqcpbc(
     rng = numpy.random.default_rng()
     params_hbz = rng.standard_normal((nq_hbz, nmodes)) * 1e-3
     params_hbz = jnp.asarray(params_hbz, dtype=jnp.float64)
-    learning_rate = jnp.asarray(0.05, dtype=jnp.float64)
 
     mass_per_component = jnp.repeat(masses, 3)
     sqrt_mass_per_component = 1.0 / jnp.sqrt(mass_per_component)
@@ -70,25 +69,6 @@ def compute_eph_mat_real_space_pyqcpbc(
     exp_iqr = jnp.exp(1j * 2.0 * jnp.pi * rph @ q_vectors.T)
     eph_raw_rot = jnp.einsum("ijkaep, pq->ijkaeq", eph_raw, exp_iqr)
     eph_raw_rot = eph_raw_rot.reshape((nband, nband, natom * 3, nre_ws, nq))
-    
-    def init_eph_real():
-        rotated_eigvecs = jnp.einsum("qvu, v, qu->qvu", eigvecs, sqrt_mass_per_component, inv_sqrt_freqs)
-        eph_real = jnp.zeros((nband, nband, nre_ws, n_delta_r, nmodes), dtype=jnp.complex128)
-        for iw in range(nband):
-            for jw in range(nband):
-                eph_mixed = jnp.einsum("veq, qvu->euq", eph_raw_rot[iw, jw], rotated_eigvecs)
-                block = jnp.einsum("euq, rq->eru", eph_mixed, exp_iq_delta_r)
-                eph_real = eph_real.at[iw, jw].set(block)
-        eph_real = jnp.abs(eph_real)
-        total_g2 = jnp.sum(eph_real**2, axis=3) # (nband, nband, nre_ws, nmodes)
-        return eph_real, total_g2
-    
-    eph_real, total_g2 = init_eph_real()
-    p_init, r_init = compute_density(eph_real, delta_r_vectors)
-    with h5py.File(fname, "w") as f:
-        f.create_dataset("init_eph_real", data=eph_real)
-        f.create_dataset("init_p", data=p_init)
-        f.create_dataset("init_r", data=r_init)
     
     def build_phase_factors(param_array):
         phases_hbz = jnp.exp(1j * param_array)
@@ -106,6 +86,17 @@ def compute_eph_mat_real_space_pyqcpbc(
                 block = jnp.einsum("euq, rq->eru", eph_mixed, exp_iq_delta_r)
                 eph_real = eph_real.at[iw, jw].set(block)
         return eph_real
+    
+    params_zeros = jnp.zeros_like(params_hbz)
+    init_eph_real = compute_eph_real(params_zeros)
+    assert jnp.allclose(init_eph_real.imag, 0.0)
+    init_eph_real = jnp.abs(init_eph_real)
+    total_g2 = jnp.sum(init_eph_real**2, axis=3)
+    p_init, r_init = compute_density(init_eph_real, delta_r_vectors)
+    with h5py.File(fname, "w") as f:
+        f.create_dataset("init_eph_real", data=init_eph_real)
+        f.create_dataset("init_p", data=p_init)
+        f.create_dataset("init_r", data=r_init)
     
     def objective(param_array):
         eph_real = compute_eph_real(param_array)
@@ -148,6 +139,7 @@ def compute_eph_mat_real_space_pyqcpbc(
                 self._best_params_vec = self.params_vec.copy()
                 with h5py.File(fname, "a") as f:
                     eph_real = compute_eph_real(params)
+                    assert jnp.allclose(eph_real.imag, 0.0)
                     best_p, _ = compute_density(eph_real, delta_r_vectors)
                     if "best_p" in f:
                         del f["best_p"]
