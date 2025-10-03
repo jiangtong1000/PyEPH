@@ -98,12 +98,23 @@ def compute_eph_mat_real_space_pyqcpbc(
         f.create_dataset("init_p", data=p_init)
         f.create_dataset("init_r", data=r_init)
     
-    def objective(param_array):
+    def objective_variance(param_array):
         eph_real = compute_eph_real(param_array)
         p, r = compute_density(eph_real, delta_r_vectors)
         Er  = jnp.sum(p * r)
         Er2 = jnp.sum(p * r**2)
         return Er2 - Er * Er
+    
+    def objective(param_array):
+        """
+        the objective_variance minimizes the variance of the e-ph matrix elements
+        which is translationally invariant
+        we can assume the mean is zero so we are localizing to the origin directly
+        """
+        eph_real = compute_eph_real(param_array)
+        p, r = compute_density(eph_real, delta_r_vectors)
+        second_moment = jnp.sum(p * r**2)
+        return second_moment
     
     @jax.jit
     def grad_function(param_array):
