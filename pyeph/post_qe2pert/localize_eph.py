@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import numpy
+import numpy as np
 import h5py
 import os
 
@@ -18,6 +19,13 @@ def zero_out_negative_freqs(freqs, eigvecs, phfreq_cutoff):
         eigvecs[iq, :, mask] = 0.0
         freqs[iq, mask] = phfreq_cutoff
     return eigvecs, freqs
+
+def compute_density(eph_real, delta_r_vectors):
+    g2 = jnp.abs(eph_real) ** 2
+    g2_r = jnp.sum(g2, axis=(0, 1, 2, 4))
+    p = g2_r / jnp.sum(g2_r)
+    r = jnp.linalg.norm(delta_r_vectors, axis=1)
+    return p, r
 
 def compute_eph_mat_real_space(
     eigvecs,
@@ -105,10 +113,15 @@ def compute_eph_mat_real_space(
                 block = jnp.einsum("euq, rq->eru", eph_mixed, exp_iq_delta_r)
                 eph_real = eph_real.at[iw, jw].set(block)
         eph_real = jnp.abs(eph_real)
-        return eph_real
+        total_g2 = jnp.sum(eph_real**2, axis=3) # (nband, nband, nre_ws, nmodes)
+        return eph_real, total_g2
     
+    eph_real, total_g2 = init_eph_real()
+    p_init, r_init = compute_density(eph_real, delta_r_vectors)
     with h5py.File(fname, "w") as f:
-        f.create_dataset("init_eph_real", data=init_eph_real())
+        f.create_dataset("init_eph_real", data=eph_real)
+        f.create_dataset("init_p", data=p_init)
+        f.create_dataset("init_r", data=r_init)
     
     def build_phase_factors(param_array):
         phases_hbz = jnp.exp(1j * param_array)
@@ -129,8 +142,10 @@ def compute_eph_mat_real_space(
     
     def objective(param_array):
         eph_real = compute_eph_real(param_array)
-        metric = -jnp.sum(jnp.abs(eph_real))
-        return metric
+        p, r = compute_density(eph_real, delta_r_vectors)
+        Er  = jnp.sum(p * r)
+        Er2 = jnp.sum(p * r**2)
+        return Er2 - Er * Er
     
     @jax.jit
     def grad_function(param_array):
@@ -159,10 +174,14 @@ def compute_eph_mat_real_space(
                 if "eph_real" in f:
                     del f["eph_real"]
                     del f["best_phase_factors"]
+                    del f["best_p"]
                 eph_real = compute_eph_real(best_params)
+                assert jnp.allclose(jnp.sum(eph_real**2, axis=3), total_g2), "Total g2 should be conserved"
+                p, r = compute_density(eph_real, delta_r_vectors)
                 best_phase_factors = build_phase_factors(best_params)
                 f.create_dataset("best_phase_factors", data=best_phase_factors)
                 f.create_dataset("eph_real", data=eph_real)
+                f.create_dataset("best_p", data=p)
 
     best_eph_real = compute_eph_real(best_params)
     best_phase_factors = build_phase_factors(best_params)
