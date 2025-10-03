@@ -6,6 +6,9 @@ def rgrid_2d_full(Nx, Ny):
     Rx, Ry = np.meshgrid(rx, ry, indexing='ij')
     return np.column_stack([Rx.ravel(), Ry.ravel(), np.zeros(Nx*Ny, int)])
 
+def get_shell_rph(rph, rph_shell):
+    rph_norm = np.linalg.norm(rph, axis=1)
+    return rph[rph_norm <= rph_shell]
 
 def rgrid_2d(width):
     rgrid = []
