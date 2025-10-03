@@ -101,7 +101,7 @@ class CalcEphMatReciprocal(PostQE2Pert):
                     # Between wannier center of iw and atomic position of ia
                     # wannier_center = self.wannier_center_cryst[iw] if iw <= jw else self.wannier_center_cryst[jw]
                     wannier_center = self.wannier_center_cryst[iw]
-                    ws_ph_indices, _ = self.set_wigner_seitz_cell(
+                    ws_ph_indices, ws_degeneracy = self.set_wigner_seitz_cell(
                         self.qc_dim, rvec_ph_images, 
                         wannier_center, atom_pos_cryst[ia]
                     )

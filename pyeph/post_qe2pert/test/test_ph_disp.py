@@ -18,7 +18,7 @@ def test_phonon_dispersion(size=10):
     freq_ref_mev = frequencies * ryd_to_mev
 
     print("Loading data from DNTT_epr.h5 and DNTT_phdisp.yml...")
-    qe2pert = PhononDispersion(epr_fname)
+    qe2pert = PhononDispersion(epr_fname, polar=True)
 
     qpoint_path_string = """11
     0.0000  0.0000  0.0000   50
