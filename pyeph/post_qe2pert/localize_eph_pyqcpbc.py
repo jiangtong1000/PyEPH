@@ -22,6 +22,7 @@ def compute_eph_mat_real_space_pyqcpbc(
     masses,
     eph_raw,
     rph,
+    re_ws_vectors,
     delta_r_vectors,
     q_hbz,
     q_minus,
@@ -56,6 +57,7 @@ def compute_eph_mat_real_space_pyqcpbc(
     assert rph.shape == (nrph_ws, 3)
     rph_shell = get_shell_rph(delta_r_vectors, rph_shell_radius)
     rph_shell = jnp.asarray(rph_shell, dtype=jnp.float64)
+    re_ws_vectors = jnp.asarray(re_ws_vectors, dtype=jnp.float64)
     
     eigvecs, freqs = zero_out_negative_freqs(freqs, eigvecs, phfreq_cutoff)
 
@@ -141,11 +143,16 @@ def compute_eph_mat_real_space_pyqcpbc(
         which is translationally invariant
         we can assume the mean is zero so we are localizing to the origin directly
         """
+        from pyeph.post_qe2pert.localize_eph import localize_reorganization_energy
         eph_real = compute_eph_real(param_array)
-        p, r = compute_density(eph_real, delta_r_vectors) # p: (nr, nmodes), r: (nr, )
-        second_moment = jnp.einsum('ru, r->u', p, r**2)
-        second_moment = jnp.sum(second_moment)
-        return second_moment
+        loss = localize_reorganization_energy(eph_real, freqs, re_ws_vectors, delta_r_vectors)
+        return loss
+        # p, r = compute_density(eph_real, delta_r_vectors) # p: (nr, nmodes), r: (nr, )
+        # second_moment = jnp.einsum('ru, r->u', p, r**2)
+        # second_moment = jnp.sum(second_moment)
+        # second_moment = jnp.sum(p * r**2)
+        # second_moment = jnp.sum(p * r**2)
+        # return second_moment
     
     @jax.jit
     def grad_function(param_array):
