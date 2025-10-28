@@ -45,14 +45,35 @@ def compute_density_each_band_and_mode(eph_real, delta_r_vectors):
     p = p / jnp.sum(p)
     return p, r
 
-def localize_reorganization_energy(eph_real, freqs, delta_re_ws, delta_r_vectors):
+def localize_reorganization_energy(
+    eph_real,
+    freqs,
+    delta_re_ws,
+    delta_r_vectors
+):
     freq = jnp.mean(freqs, axis=0)
+    inv_omega = 1.0 / freq
     g2 = jnp.abs(eph_real) ** 2
-    reorg_energy = jnp.einsum("ijeru, u->ijeru", g2, 1/freq)
-    reorg_energy = reorg_energy.sum(axis=(0, 1, 4)) # (nRe, n_delta_r)
-    diff_re_rph = delta_re_ws[:, None, :] / 2 - delta_r_vectors[None, :, :]
-    diff_re_rph_norm2 = jnp.linalg.norm(diff_re_rph, axis=-1) # (nRe, n_delta_r)
-    loss = jnp.sum(reorg_energy * diff_re_rph_norm2)
-    return loss
+    reorg = jnp.einsum('ijeru,u->ijer', g2, inv_omega)
+    
+    # apply mask
+    reorg_denom = jnp.sum(reorg, axis=(3))
+    mask = reorg_denom * ryd_to_mev > 1
+    reorg = jnp.where(mask[..., None], reorg, 0.0)
+    
+    # # perform normalization for each hopping, not sure if we want this
+    # inv_reorg_denom = jnp.where(mask, 1.0 / (reorg_denom + 1e-10), 0.0)
+    # reorg = jnp.einsum('ijer, ije->ijer', reorg, inv_reorg_denom)
 
-# compute_density = compute_density_each_band_and_mode
+    reorg = reorg.sum(axis=(0, 1))
+    
+    rp_norm = jnp.linalg.norm(delta_r_vectors, axis=1)
+    rep_diff_norm = jnp.linalg.norm(delta_re_ws[:, None, :] - delta_r_vectors[None, :, :], axis=-1)
+    eq_mask = jnp.isclose(rep_diff_norm, 0.0, atol=1e-6, rtol=0.0)
+    weight = jnp.where(eq_mask, -1.0, rp_norm[None, :])
+    arg_rph_zero = jnp.argmin(rp_norm)
+    weight = weight.at[:, arg_rph_zero].set(-1.0)
+    # weight = weight ** 0.5
+    
+    loss = jnp.sum(reorg * weight)
+    return loss

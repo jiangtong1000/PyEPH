@@ -40,7 +40,7 @@ def compute_eph_mat_real_space_pyqcpbc(
         eigvecs: (nq, nmodes, nmodes)
         freqs: (nq, nmodes)
         masses: (natom,)
-        eph_raw: (nband, nband, natom * 3, nre_ws, nq)
+        eph_raw: (nband, nband, natom, 3, nre_ws, nq)
         rph: (nrph_ws, 3), the Wigner-Seitz lattice vectors
         delta_r_vectors: (n_delta_r, 3), the displacement vectors to minimize the objective
     """
