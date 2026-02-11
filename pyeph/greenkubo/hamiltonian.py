@@ -24,7 +24,7 @@ def validate_displacement_data(tmat, gmat):
         raise ValueError(
             f"gmat contains displacements with no static hopping counterpart: {missing}"
         )
-    if not all((dx >= 0 or dy > 0) for dx, dy in hop_keys):
+    if not all(((dx >= 0 and dy==0) or dy > 0) for dx, dy in hop_keys):
         raise ValueError(
             "tmat must only contain non-negative displacements; provide canonicalized data"
         )
