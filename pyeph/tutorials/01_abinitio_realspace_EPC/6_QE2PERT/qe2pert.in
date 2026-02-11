@@ -1,0 +1,12 @@
+&qe2pert
+ prefix='PREFIX'                            ! TODO: same prefix
+ outdir='./tmp'
+ phdir='../3_PHONONS/save'
+ nk1=2, nk2=2, nk3=2                       ! TODO: same k-grid as in nscf.in
+ dft_band_min = 101                         ! TODO: first band for Wannierization
+ dft_band_max = 102                         ! TODO: last band (dft_band_max - dft_band_min + 1 = num_wann)
+ num_wann = 2                               ! TODO: number of Wannier functions
+ lwannier=.true.
+ load_ephmat = .false.
+ system_2d = .false.
+/

@@ -1,0 +1,48 @@
+&CONTROL
+  prefix = 'PREFIX'                         ! TODO: set prefix
+  calculation = 'vc-relax'
+  nstep = 200
+  forc_conv_thr = 1.0d-5                    ! make it tight enough for phonons
+  wf_collect = .true.
+  outdir='./tmp'
+  pseudo_dir='/path/to/q-e-qe-7.3.1/pseudo'              ! TODO: path to pseudopotentials
+/
+&SYSTEM
+   ntyp             = 3                     ! TODO: number of atom types
+   nat              = 72                    ! TODO: number of atoms
+   ibrav            = 0
+   ecutwfc          = 90.0                  ! TODO: wavefunction cutoff (Ry)
+   ecutrho          = 360.0                 ! TODO: charge density cutoff (Ry)
+   vdw_corr = 'grimme-d3'                  ! TODO: vdW correction (remove if not needed)
+   input_dft = 'PBE'                        ! TODO: XC functional
+   dftd3_threebody = .false.
+/
+&ELECTRONS
+  conv_thr = 1.0d-15
+  mixing_mode = 'plain'
+  mixing_beta = 0.7  
+  diagonalization = 'david'
+  diago_full_acc = .true.
+/
+&IONS
+/
+&CELL
+press_conv_thr = 0.01
+/
+ATOMIC_SPECIES
+! TODO: set atomic species
+S 32.06 S_NCSR.upf
+C 12.011 C_NCSR.upf
+H 1.008 H_NCSR.upf
+
+CELL_PARAMETERS angstrom
+! TODO: set initial (unrelaxed) cell parameters
+0.0000000000  8.4800000000  0.0000000000
+6.1540000000  0.0000000000  0.0000000000
+0.0000000000 -0.1085042086 -13.5145644339
+
+ATOMIC_POSITIONS angstrom
+! TODO: set initial (unrelaxed) atomic positions
+! ... paste atomic positions here ...
+K_POINTS (automatic)
+  2 2 2 0 0 0

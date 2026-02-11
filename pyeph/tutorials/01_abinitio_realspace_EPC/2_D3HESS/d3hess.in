@@ -1,0 +1,4 @@
+&INPUT
+  prefix = 'PREFIX'                         ! TODO: same prefix as SCF
+  outdir = '../1_SCF/tmp'
+/
