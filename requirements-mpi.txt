@@ -4,3 +4,5 @@ h5py>=3.0.0
 pytest>=6.0.0
 matplotlib>=3.0.0
 mpi4py>=3.0.0
+joblib
+numba

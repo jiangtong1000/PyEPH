@@ -2,12 +2,18 @@
 
 import logging
 import sys
+import os
 from typing import Optional
 
-try:
-    from mpi4py import MPI
-    _HAS_MPI = True
-except ImportError:
+# this is used to disable MPI for debugging purposes, especially if MPI is not available
+use_mpi = os.environ.get('USE_MPI', 'true').lower() == 'true'
+if use_mpi:
+    try:
+        from mpi4py import MPI
+        _HAS_MPI = True
+    except ImportError:
+        _HAS_MPI = False
+else:
     _HAS_MPI = False
 
 
@@ -105,4 +111,4 @@ def setup_logger(
 
 
 # Default logger instance (master rank only)
-default_logger = setup_logger()
+logger = setup_logger()
