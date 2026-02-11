@@ -54,7 +54,7 @@ def localize_reorganization_energy(
     freq = jnp.mean(freqs, axis=0)
     inv_omega = 1.0 / freq
     g2 = jnp.abs(eph_real) ** 2 # (nband, nband, nre, n_delta_rp, nmodes)
-    g2.at[1, 0].set(0.0)
+    g2 = g2.at[1,0].set(0.0)
     reorg = jnp.einsum('ijeru,u->ijer', g2, inv_omega)
     
     # apply mask
