@@ -29,11 +29,16 @@ jobs:
     - name: Set PYTHONPATH
       run: echo "PYTHONPATH=${{ github.workspace }}" >> $GITHUB_ENV
     
-    - name: Run non-MPI tests
+    - name: Run non-MPI tests for post_qe2pert
       run: |
         cd pyeph/post_qe2pert/test
         python -m pytest test_ph_disp.py::test_phonon_dispersion -v
         python -m pytest test_electron_band.py::test_electron_bands -v
+    
+    - name: Run non-MPI tests for greenkubo
+      run: |
+        cd pyeph/greenkubo/tests
+        python -m pytest test_greenkubo.py -v
 
   test-mpi:
     runs-on: ubuntu-latest
