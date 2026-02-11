@@ -27,7 +27,7 @@ Construct an real-space first-principles EPH Hamiltonian from crystal structure.
 
 ```bash
 # 1. Copy template to your project
-cp -r 01_build_hamiltonian/ /path/to/my_project/
+cp -r 01_abinitio_realspace_EPC/ /path/to/my_project/
 
 # 2. Find all TODOs and fill them in
 grep -rn "TODO" /path/to/my_project/
