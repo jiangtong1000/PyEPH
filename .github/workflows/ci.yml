@@ -38,7 +38,7 @@ jobs:
     - name: Run non-MPI tests for greenkubo
       run: |
         cd pyeph/greenkubo/tests
-        python -m pytest test_greenkubo.py -v
+        python -m pytest -v
 
   test-mpi:
     runs-on: ubuntu-latest
