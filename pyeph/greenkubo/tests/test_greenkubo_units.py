@@ -10,6 +10,8 @@ import pytest
 from pyeph.greenkubo.utils import wannier_center_and_cell_vecs_for_simple_2D
 from pyeph.greenkubo.lattice import BravaisLattice2D
 from pyeph.greenkubo.hamiltonian import ElectronPhononHamiltonian
+from pyeph.greenkubo.estimator import current_from_density_no_polaron
+import scipy.linalg
 
 @pytest.mark.parametrize("nx", [4, 6])
 @pytest.mark.parametrize("ny", [6, 10])
@@ -82,6 +84,49 @@ def test_ham_static_and_current_operator(nx, ny):
     jx, jy = ham.build_jx_jy([ham.h_static])
     jx = jx[0].toarray()
     jy = jy[0].toarray()
-
     assert numpy.allclose(jx, jx_ref)
     assert numpy.allclose(jy, jy_ref)
+
+
+
+@pytest.mark.parametrize("temperature", [0.1, 1.0, 10.0])
+@pytest.mark.parametrize("nx", [4, 6])
+@pytest.mark.parametrize("ny", [6, 10])
+def test_estimator(nx, ny, temperature):
+    ncenter = 2
+    beta = 1.0 / temperature
+    wannier_center_pos, cell_vecs = wannier_center_and_cell_vecs_for_simple_2D(1.0, 1.0)
+        
+    diag_tmat = numpy.random.random((ncenter, ncenter))
+    diag_tmat = diag_tmat + diag_tmat.T
+    tmat = {
+        (0, 0): diag_tmat,
+        (1, 0): numpy.random.random((ncenter, ncenter)),
+        (0, 1): numpy.random.random((ncenter, ncenter)),
+        (1, 1): numpy.random.random((ncenter, ncenter)),
+        (-1, 1): numpy.random.random((ncenter, ncenter))
+    }
+    
+    lattice = BravaisLattice2D(nx, ny, ncenter, wannier_center_pos, cell_vecs)
+    ham = ElectronPhononHamiltonian(tmat, {}, lattice)
+    ham.build_static_hopping_matrix()
+    hstatic = ham.h_static.toarray()
+    jx, jy = ham.build_jx_jy([ham.h_static])
+    
+    eigvals, eigvecs = scipy.linalg.eigh(hstatic)
+    rho = eigvecs @ numpy.diag(numpy.exp(-beta * eigvals)) @ eigvecs.T
+    rho_0 = rho / rho.trace()
+    jx_dense = jx[0].toarray()
+    jy_dense = jy[0].toarray()
+    j_rho0_x_T = (jx_dense @ rho_0).T
+    j_rho0_y_T = (jy_dense @ rho_0).T
+
+    random_matrix = numpy.random.random((nx*ny*ncenter, nx*ny*ncenter)) + 1.0j * numpy.random.random((nx*ny*ncenter, nx*ny*ncenter))
+    u_t, _ = numpy.linalg.qr(random_matrix)
+    ct_x = current_from_density_no_polaron(j_rho0_x_T, u_t, jx[0])
+    ct_y = current_from_density_no_polaron(j_rho0_y_T, u_t, jy[0])
+    
+    ct_x_ref = -numpy.einsum('ji, jk, kl, li->', u_t.conj(), jx_dense, u_t, j_rho0_x_T.T)
+    ct_y_ref = -numpy.einsum('ji, jk, kl, li->', u_t.conj(), jy_dense, u_t, j_rho0_y_T.T)
+    assert numpy.allclose(ct_x, ct_x_ref)
+    assert numpy.allclose(ct_y, ct_y_ref)
