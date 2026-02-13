@@ -115,7 +115,6 @@ class ClassicalPhononNonlocal(ClassicPhononBath):
         self.w_full, self.q_half, self.q_partner, self.half_ij, self.partner_ij, self.qgrid_full = get_mp_qmesh_info(nx, ny, self.w_half) # (nmodes, nx, ny)
         rdotq = numpy.einsum("ra,xya->rxy", self.rgrids, self.qgrid_full)
         self.expiqr = numpy.exp(1j * 2.0 * numpy.pi * rdotq) / numpy.sqrt(nx * ny)
-        # self.expiqr = numpy.exp(1j * 2.0 * numpy.pi * rdotq)
         
         ## only for debugging purpose
         rng2 = numpy.random.default_rng(0)

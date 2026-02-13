@@ -1,6 +1,5 @@
 import numpy
 
-
 def q_1d_mp_centered(N):
     # negative -> positive ordering, in [-0.5, 0.5)
     return (numpy.arange(N, dtype=float) + 0.5) / N - 0.5
@@ -33,13 +32,13 @@ def build_half_indices(Nx, Ny):
     return numpy.array(half, int), numpy.array(partner, int)
 
 def half_q_points(Nx, Ny):
-    qx, qy, Q = q_grid_mp_centered(Nx, Ny)
+    _, _, Q = q_grid_mp_centered(Nx, Ny)
     half_ij, partner_ij = build_half_indices(Nx, Ny)
     q_half = Q[half_ij[:,0], half_ij[:,1]]  # (nhalf,2)
     q_partner = Q[partner_ij[:,0], partner_ij[:,1]]  # (nhalf,2)
     return q_half, q_partner, half_ij, partner_ij, Q
 
-def half_modes_to_full_modes(freq_half, q_half, q_partner, half_ij, partner_ij, Nx, Ny):
+def half_modes_to_full_modes(freq_half, half_ij, partner_ij, Nx, Ny):
     """
     freq_half : (nmodes, nhalf_qpts) ndarray
     q_half : (nhalf, 2) ndarray
@@ -63,5 +62,5 @@ def half_modes_to_full_modes(freq_half, q_half, q_partner, half_ij, partner_ij, 
 
 def get_mp_qmesh_info(Nx, Ny, freq_half):
     q_half, q_partner, half_ij, partner_ij, Q = half_q_points(Nx, Ny)
-    freq_full = half_modes_to_full_modes(freq_half, q_half, q_partner, half_ij, partner_ij, Nx, Ny)
+    freq_full = half_modes_to_full_modes(freq_half, half_ij, partner_ij, Nx, Ny)
     return freq_full, q_half, q_partner, half_ij, partner_ij, Q

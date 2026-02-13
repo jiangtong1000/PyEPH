@@ -5,3 +5,6 @@ pytest>=6.0.0
 matplotlib>=3.0.0
 joblib
 numba
+pymatgen
+jax
+jaxlib

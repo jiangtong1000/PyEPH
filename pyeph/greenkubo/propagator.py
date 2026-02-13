@@ -98,6 +98,7 @@ class DensityMatrixUnitaryPropagator(UnitaryPropagator):
         
     def evolve(self, ham, classic_ph, quantum_ph):
         # rk4:
+        hep_0 = [hep * self.polaron_prefactor for hep in ham.heps]
         classic_ph.update_position(self.time + 0.5 * self.time_step)
         hep_mid = ham.build_ep_variation_matrix(classic_ph.qfield)
         hep_mid = [hep * self.polaron_prefactor for hep in hep_mid]
@@ -107,8 +108,8 @@ class DensityMatrixUnitaryPropagator(UnitaryPropagator):
             quantum_ph.update_phit(self.time)
             self.sec_weights = quantum_ph.sector_weights
         ham.heps = ham.build_ep_variation_matrix(classic_ph.qfield)
-        hep_final_polaron_transform = [hep * self.polaron_prefactor for hep in ham.heps]
-        self.u_t = integrate_unitary_rk4(self.u_t, ham.heps, hep_mid, hep_final_polaron_transform, self.time_step, self.ntraj)
+        hep_final = [hep * self.polaron_prefactor for hep in ham.heps]
+        self.u_t = integrate_unitary_rk4(self.u_t, hep_0, hep_mid, hep_final, self.time_step, self.ntraj)
         '''
         # exact:
         classic_ph.update_position(self.time + self.time_step)
@@ -133,7 +134,7 @@ class DensityMatrixUnitaryPropagator(UnitaryPropagator):
             )
         return ctx, cty
 
-    def calculate_current_polaron(self, jx_t, jy_t):
+    def calculate_current_polaron(self, jx_t, jy_t, use_python=False):
         # Debugging purpose
         # self.sec_weights = numpy.ones_like(self.sec_weights)
         # self.F0 = {key: 1.0 for key in self.F0.keys()}
@@ -147,7 +148,8 @@ class DensityMatrixUnitaryPropagator(UnitaryPropagator):
             self.sec_weights,
             quad_idx=self.sector_quad_idx,
             F0_vals=self.sector_F0_vals,
-            sector_offsets=self.sector_offsets
+            sector_offsets=self.sector_offsets,
+            use_python=use_python
         )
         cty = current_from_density_polaron(
             self.u_t,
@@ -159,7 +161,8 @@ class DensityMatrixUnitaryPropagator(UnitaryPropagator):
             self.sec_weights,
             quad_idx=self.sector_quad_idx,
             F0_vals=self.sector_F0_vals,
-            sector_offsets=self.sector_offsets
+            sector_offsets=self.sector_offsets,
+            use_python=use_python
         )
         
         '''

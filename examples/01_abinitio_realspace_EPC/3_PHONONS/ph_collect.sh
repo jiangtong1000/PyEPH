@@ -6,6 +6,7 @@
 # the dvscf files for q-point i are stored in tmp/_ph{i-1}/
 
 PREFIX='PREFIX' # TODO: same prefix as in ph.in
+NPH=8           # TODO: number of irreducible q-points (same as -ni in submit.sh)
 
 #ph-collect.sh should be in the work directory of PHonon calculation
 
@@ -13,6 +14,7 @@ echo `date`
 echo `pwd`
 
 echo 'PREFIX: ' $PREFIX
+echo 'NPH-images:    ' $NPH
 echo "Creating a save dir..."
 mkdir -p save/${PREFIX}.phsave
 
@@ -27,12 +29,10 @@ cp ./${PREFIX}.dyn* save/
 echo "Copying the dvscf file for the first q-point..."
 cp ${PH0_DIR}/${PREFIX}.dvscf1 save/${PREFIX}.dvscf_q1
 
-echo "Copy the dvscf for q-points > 1..."
-for q_folder in ${PH0_DIR}/${PREFIX}.q_*; do
-   echo $q_folder;
-   NQ=`echo $q_folder | awk -F_ '{print $NF}'`;
-   # cp ${PH0_DIR}/${PREFIX}.q_${NQ}/${PREFIX}.dvscf1 save/${PREFIX}.dvscf_q${NQ} # original
-   cp tmp/_ph$((NQ-1))/${PREFIX}.q_${NQ}/${PREFIX}.dvscf1 save/${PREFIX}.dvscf_q${NQ} # my fix here
+echo "Copy the dvscf for q-points 2..${NPH}..."
+for NQ in $(seq 2 $NPH); do
+   echo "q-point ${NQ}: tmp/_ph$((NQ-1))/${PREFIX}.q_${NQ}/";
+   cp tmp/_ph$((NQ-1))/${PREFIX}.q_${NQ}/${PREFIX}.dvscf1 save/${PREFIX}.dvscf_q${NQ}
 done
 
 echo "Done!"

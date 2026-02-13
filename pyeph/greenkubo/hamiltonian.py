@@ -93,6 +93,8 @@ class ElectronPhononHamiltonian:
         cols = numpy.concatenate(cols)
         data = numpy.concatenate(data)
         self.h_static = scipy.sparse.coo_matrix((data, (rows, cols)), shape=(self.lattice.nsites, self.lattice.nsites)).tocsr()
+        hstatic = self.h_static.toarray()
+        assert numpy.allclose(hstatic, hstatic.T), "hstatic is not symmetric, something is wrong with the input tmat"
         row, col = self.h_static.nonzero()
         self.hopping_pairs = numpy.array(list(zip(row, col)))
         self.get_minimal_image_displacement()

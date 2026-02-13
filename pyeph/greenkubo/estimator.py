@@ -23,9 +23,6 @@ def current_from_density_no_polaron(
     Compute the current without polaron transformation.
     C(t) = -Tr[J(t) U J(0) rho_0 U^dagger]
     """
-    # Debugging purpose
-    # j_t_dense = j_t.toarray()
-    # c_t = -numpy.einsum("ij, jk, ki->", j_t_dense, u_t, jrho0T.T, optimize=True)
     w = u_t.conj() @ jrho0T
     c_t = -sum_current_jit(u_t, w, j_t.data, j_t.indices, j_t.indptr, j_t.shape[0])
     return c_t

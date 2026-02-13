@@ -21,6 +21,10 @@ export MKL_NUM_THREADS=$OMP_NUM_THREADS
 # Heavy DFPT calculation
 # -ni 8: parallelize over 8 q-points (images); adjust to match your q-grid
 # -nk 8: k-point pools per image, has to be consistent with SCF
+
+# Try to run with mpirun -np 24 ph.x -nk 8 < ph.in > ph.out
+# Then check the output file to see how many irreducible q-points are used
+# This gives us how to set the -ni parameter
 mpirun -np 192 ph.x -ni 8 -nk 8 < ph.in > ph.out
 
 # Fast merge: 24 ranks, no -ni, recover=.true.
