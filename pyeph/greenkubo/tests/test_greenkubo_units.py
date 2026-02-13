@@ -251,7 +251,7 @@ def test_estimator_with_quantum_ph(nx, ny, temperature, nmodes):
     quantum_ph.update_phit(time_now)
     assert quantum_ph.phit == phit
     propagator.sec_weights = quantum_ph.sector_weights
-    propagator.u_t = [u_t]
+    propagator.u_t = numpy.array([u_t])
             
     ct_x_naive, ct_y_naive = propagator.calculate_current_polaron(jx_t, jy_t, use_python=True)
     ct_x, ct_y = propagator.calculate_current_polaron(jx_t, jy_t, use_python=False)

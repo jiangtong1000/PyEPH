@@ -6,3 +6,6 @@ matplotlib>=3.0.0
 mpi4py>=3.0.0
 joblib
 numba
+pymatgen
+jax
+jaxlib
