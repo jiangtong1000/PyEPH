@@ -1,4 +1,4 @@
-name: Test Post_QE2PERT
+name: CI
 
 on:
   push:
