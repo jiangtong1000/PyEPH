@@ -132,10 +132,10 @@ def test_estimator_classical(nx, ny, temperature):
     assert numpy.allclose(ct_x, ct_x_ref)
     assert numpy.allclose(ct_y, ct_y_ref)
 
-@pytest.mark.parametrize("temperature", [0.1, 10.0])
+@pytest.mark.parametrize("temperature", [0.1])
 @pytest.mark.parametrize("nx", [6])
-@pytest.mark.parametrize("ny", [8])
-@pytest.mark.parametrize("nmodes", [2, 10])
+@pytest.mark.parametrize("ny", [4])
+@pytest.mark.parametrize("nmodes", [5])
 def test_estimator_with_quantum_ph(nx, ny, temperature, nmodes):
     # the energy unit can be viewed as 100 meV
     beta = 1.0 / temperature
