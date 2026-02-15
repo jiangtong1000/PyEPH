@@ -20,7 +20,8 @@ This collects dynamical matrices and dvscf files into `save/` for step 6.
 
 | Parameter | Description |
 |-----------|-------------|
-| `nq1, nq2, nq3` | q-point grid (must match in `ph.in` and `ph2.in`) |
+| `tr2_ph` | **Convergence threshold for the phonon calculation** (must be tight for organic crystals, e.g., `1.0d-17`, to avoid spurious negative phonon frequencies; also see [QE issue #385](https://gitlab.com/QEF/q-e/-/issues/385)) |
+| `nq1, nq2, nq3` | q-point grid |
 | `-ni N` | Number of images; distributes q-points across N images |
 | `-nk N` | k-point pool parallelization |
 | `lqdir=.true.` | Store per-q-point data in separate subdirectories (`tmp/_ph*/DNTT.q_*/`) |

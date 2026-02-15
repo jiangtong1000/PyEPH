@@ -12,7 +12,7 @@
    nat              = 72                    ! TODO: number of atoms
    ibrav            = 0
    ecutwfc          = 90.0                  ! TODO: wavefunction cutoff (Ry)
-   ecutrho          = 360.0                 ! TODO: charge density cutoff (Ry)
+   ecutrho          = 360.0                 ! TODO: charge density cutoff (Ry) has to be 4 x ecutwfc
    vdw_corr = 'grimme-d3'                  ! TODO: vdW correction (remove if not needed)
    input_dft = 'PBE'                        ! TODO: XC functional
    dftd3_threebody = .false.

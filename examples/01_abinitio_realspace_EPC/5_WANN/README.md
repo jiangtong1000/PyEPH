@@ -32,9 +32,6 @@ The submit script typically runs:
 Check the **highest occupied / lowest unoccupied** energies in `nscf.out` to guide
 the `dis_win_min/max` and `dis_froz_min/max` settings.
 
-Use [SeeK-path](https://www.materialscloud.org/work/tools/seekpath) to determine
-the correct high-symmetry path for your crystal.
-
 ## Troubleshooting
 
 | Error | Solution |
