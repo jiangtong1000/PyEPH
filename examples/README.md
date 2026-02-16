@@ -3,6 +3,7 @@
 Workflows for electron-phonon coupling modeling and dynamics simulation.
 
 ## Available Examples
+![Workflow Overview](workflow_hamiltonian_paper.png)
 
 | # | Example | Description |
 |---|----------|-------------|
