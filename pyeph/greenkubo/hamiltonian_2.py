@@ -31,7 +31,7 @@ def validate_displacement_data(tmat, gmat):
 
 
 class ElectronPhononHamiltonian:
-    def __init__(self, tmat: dict, gmat: dict, lattice: BravaisLattice2D, debug=False):
+    def __init__(self, tmat: dict, gmat: dict, lattice: BravaisLattice2D):
         """
         tmat is a dictionary for different displacements D,
             each D contains a (ncenter, ncenter) matrix for hopping to the displaced cell
@@ -45,7 +45,6 @@ class ElectronPhononHamiltonian:
         self.gmat = gmat
         self._cell_shift_cache = {}
         self.build_static_hopping_matrix()
-        self.debug = debug
     
     def _cell_index_with_shift(self, dx, dy):
         """
@@ -152,7 +151,7 @@ class ElectronPhononHamiltonian:
         self.drx = numpy.array(drx)
         self.dry = numpy.array(dry)
         
-    def build_ep_variation_matrix(self, qfield, atol=1e-8):
+    def build_ep_variation_matrix(self, qfield, imode, atol=1e-8):
         """
         build the ep-variation matrix hprime = h + hepc with same shape as from build_static_hopping_matrix,
         hepc = sum_De sum_Dp sum_R sum_ij g[De][Dp]_{ijv} Q_{R+Dp,v} a_{i,R}^\dagger a_{j,R+De}
@@ -173,12 +172,14 @@ class ElectronPhononHamiltonian:
 
         gq = {}
         # precompute g at q
+        # logger.info('gmat keys: %s', self.gmat.keys())
         for (dx_e, dy_e), gmat_De in self.gmat.items():
+            # logger.info('gmat_De keys: %s', gmat_De.keys())
             gq[(dx_e, dy_e)] = {}
             for (dx_p, dy_p), gmat_Dp in gmat_De.items():
                 # (ncenter, ncenter, nmodes)(nmodes, ntraj, ncells) -> (ncenter, ncenter, ntraj, ncells)
-                gq[(dx_e, dy_e)][(dx_p, dy_p)] = numpy.tensordot(gmat_Dp, qfield, axes=([-1], [0]))
-                
+                gq[(dx_e, dy_e)][(dx_p, dy_p)] = numpy.tensordot(gmat_Dp[..., imode:imode+1], qfield[imode:imode+1], axes=([-1], [0]))
+        # exit()
         ncenter = self.lattice.ncenter
         ncells = self.lattice.ncells
         hop_from_base = self.lattice.cell_idx * ncenter
@@ -237,14 +238,13 @@ class ElectronPhononHamiltonian:
         # hep = hep_list[0].toarray()
         # hep_reordered = hep[:, map][map, :]
         
-        if self.debug:
-            import h5py
-            with h5py.File("hep.h5", "w") as f:
-                f.create_dataset("hstatic", data=self.h_static.toarray())
-                heps = numpy.concatenate([hep.toarray() for hep in hep_list])
-                heps = numpy.reshape(heps, (ntraj, self.lattice.nsites, self.lattice.nsites))
-                f.create_dataset("heps", data=heps)
-            exit()
+        # import h5py
+        # with h5py.File("hep.h5", "w") as f:
+        #     f.create_dataset("hstatic", data=self.h_static.toarray())
+        #     heps = numpy.concatenate([hep.toarray() for hep in hep_list])
+        #     heps = numpy.reshape(heps, (ntraj, self.lattice.nsites, self.lattice.nsites))
+        #     f.create_dataset("heps", data=heps)
+        # exit()
         return hep_list
 
     def build_jx_jy(self, hep_list):

@@ -8,6 +8,18 @@ from pyeph.greenkubo.estimator import (
     _prepare_sector_arrays
 )
 
+import scipy.sparse as sp
+
+def scale_offdiag(a: sp.csr_matrix, f):
+    b = a.copy()
+    b.data *= f
+    b.setdiag(a.diagonal())
+    b.eliminate_zeros()      # remove any explicit zeros that got introduced
+    return b
+
+def band_narrow(heps, f):
+    return [scale_offdiag(hep, f) for hep in heps] if f != 1.0 else heps # f=1 is used for CPA only case
+
 class UnitaryPropagator:
     def __init__(self, nsites, ntraj_per_rank, time_step, total_time, temperature):
         self.nsites = nsites
@@ -59,8 +71,14 @@ class DensityMatrixUnitaryPropagator(UnitaryPropagator):
     def build(self, ham, quantum_ph):
         assert quantum_ph is not None
         self.polaron_transform = True
+        self.band_narrow_only = quantum_ph.band_narrow_only
         if not quantum_ph.band_narrow_only:
             self.calculate_current = self.calculate_current_polaron
+        self.polaron_prefactor = quantum_ph.polaron_prefactor
+        
+        if self.band_narrow_only:
+            self.calculate_current = self.calculate_current_no_polaron
+            return
         
         F0 = {}
         for (i, j) in ham.hopping_pairs:
@@ -75,7 +93,6 @@ class DensityMatrixUnitaryPropagator(UnitaryPropagator):
         # Pre-flatten sectors/F0 for fast estimator calls.
         self.sector_quad_idx, self.sector_F0_vals, self.sector_offsets = _prepare_sector_arrays(self.sectors, self.F0)
         self.sec_weights = quantum_ph.sector_weights
-        self.polaron_prefactor = quantum_ph.polaron_prefactor
         
     def initialize_density_matrix(self, heps, jx_0, jy_0):
         # Dense copies avoid repeated sparse->dense conversions later.
@@ -98,17 +115,18 @@ class DensityMatrixUnitaryPropagator(UnitaryPropagator):
         
     def evolve(self, ham, classic_ph, quantum_ph):
         # rk4:
-        hep_0 = [hep * self.polaron_prefactor for hep in ham.heps]
+        # hep_0 = [hep * self.polaron_prefactor for hep in ham.heps]
+        hep_0 = band_narrow(ham.heps, self.polaron_prefactor)
         classic_ph.update_position(self.time + 0.5 * self.time_step)
         hep_mid = ham.build_ep_variation_matrix(classic_ph.qfield)
-        hep_mid = [hep * self.polaron_prefactor for hep in hep_mid]
+        hep_mid = band_narrow(hep_mid, self.polaron_prefactor)
         self.time = self.time + self.time_step
         classic_ph.update_position(self.time)
         if self.polaron_transform:
             quantum_ph.update_phit(self.time)
             self.sec_weights = quantum_ph.sector_weights
         ham.heps = ham.build_ep_variation_matrix(classic_ph.qfield)
-        hep_final = [hep * self.polaron_prefactor for hep in ham.heps]
+        hep_final = band_narrow(ham.heps, self.polaron_prefactor)
         self.u_t = integrate_unitary_rk4(self.u_t, hep_0, hep_mid, hep_final, self.time_step, self.ntraj)
         '''
         # exact:
@@ -132,6 +150,9 @@ class DensityMatrixUnitaryPropagator(UnitaryPropagator):
                 self.u_t[itraj],
                 jy_t[itraj]
             )
+        if self.band_narrow_only:
+            ctx = ctx * self.polaron_prefactor**2
+            cty = cty * self.polaron_prefactor**2
         return ctx, cty
 
     def calculate_current_polaron(self, jx_t, jy_t, use_python=False):

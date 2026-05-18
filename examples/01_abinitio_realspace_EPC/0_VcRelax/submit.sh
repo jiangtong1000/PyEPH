@@ -5,8 +5,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=24
 #SBATCH --mem=100GB
-#SBATCH --output=job.out
-#SBATCH --error=job.err
+#SBATCH --output=scf.out
+#SBATCH --error=scf.err
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=TODO_EMAIL
 

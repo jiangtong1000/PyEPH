@@ -11,11 +11,6 @@
 | `PREFIX.win` | Wannier90 control file |
 | `pw2wan.in` | QE-to-Wannier90 interface input |
 
-The submit script typically runs:
-1. `wannier90.x -pp PREFIX` (preprocessing: generates `PREFIX.nnkp`)
-2. `pw2wannier90.x < pw2wan.in` (computes overlaps `PREFIX.mmn`, `PREFIX.amn`)
-3. `wannier90.x PREFIX` (minimizes spread, produces `PREFIX_hr.dat`)
-
 ## Key Parameters to Tune
 
 | Parameter | Description |
@@ -26,6 +21,13 @@ The submit script typically runs:
 | `projections` | Initial guess; `random` works for many cases |
 | `mp_grid` | Must match the k-grid in `nscf.in` |
 | `kpoint_path` | High-symmetry path for band interpolation |
+
+Use `detect_wannier_window.py` to determine the energy windows in `nscf.out`.
+
+The submit script typically runs:
+1. `wannier90.x -pp PREFIX` (preprocessing: generates `PREFIX.nnkp`)
+2. `mpirun -np 8 pw2wannier90.x -i pw2wan.in > pw2wan.out` (computes overlaps `PREFIX.mmn`, `PREFIX.amn`)
+3. `wannier90.x PREFIX` (minimizes spread, produces `PREFIX_hr.dat`)
 
 ### Setting Energy Windows
 

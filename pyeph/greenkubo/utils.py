@@ -23,6 +23,8 @@ au2ev = c["Hartree energy in eV"][0]
 K2au = c["kelvin-hartree relationship"][0]
 cm2au = 1.0e2 * c["inverse meter-hertz relationship"][0] / c["hartree-hertz relationship"][0]
 fs2au = 1.0e-15 / c["atomic unit of time"][0]
+ryd_to_ev = 13.605698066
+ryd_to_mev = ryd_to_ev * 1000.0
 
 mobility2au = au2ev * c["atomic unit of time"][0] / (c["atomic unit of length"][0] * 100) ** 2
 
