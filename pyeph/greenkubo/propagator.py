@@ -67,6 +67,7 @@ class DensityMatrixUnitaryPropagator(UnitaryPropagator):
         self.F0 = None
         self.sectors = None
         self.sec_weights = None
+        self.band_narrow_only = False
     
     def build(self, ham, quantum_ph):
         assert quantum_ph is not None

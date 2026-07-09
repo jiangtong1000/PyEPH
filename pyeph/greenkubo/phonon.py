@@ -214,7 +214,7 @@ class ClassicalPhononNonlocal(ClassicPhononBath):
         # return Xr.reshape(self.nmodes, self.ntraj, -1)
    
 class QuantumPhononBath:
-    def __init__(self, ph_freq, gmat, temperature):
+    def __init__(self, ph_freq, gmat, temperature, band_narrow_only=False):
         """
         ph_freq : (nmodes,) ndarray
             Phonon frequencies for each mode.
@@ -237,7 +237,7 @@ class QuantumPhononBath:
         logger.info(f"Polaron transform prefactor: {self.polaron_prefactor}")
         self.exponents = numpy.array([-2, -1, 0, 1, 2])
         self.sector_weights = numpy.exp(-self.exponents * self.phi0)
-        self.band_narrow_only = False
+        self.band_narrow_only = band_narrow_only
     
     def update_phit(self, t):
         phit = self.g_dimless **2 * (numpy.cos(self.w * t) / numpy.tanh(self.beta * self.w / 2) - 1.0j * numpy.sin(self.w * t))
