@@ -1,6 +1,7 @@
 import numpy
 import scipy.sparse
 from pyeph.greenkubo.lattice import BravaisLattice2D
+from pyeph.greenkubo.utils import write_hdf5_csr_matrix, write_hdf5_csr_matrix_list
 from pyeph.utils.logger import logger
 
 def validate_displacement_data(tmat, gmat):
@@ -239,11 +240,13 @@ class ElectronPhononHamiltonian:
         
         if self.debug:
             import h5py
+            jx, jy = self.build_jx_jy(hep_list)
+
             with h5py.File("hep.h5", "w") as f:
-                f.create_dataset("hstatic", data=self.h_static.toarray())
-                heps = numpy.concatenate([hep.toarray() for hep in hep_list])
-                heps = numpy.reshape(heps, (ntraj, self.lattice.nsites, self.lattice.nsites))
-                f.create_dataset("heps", data=heps)
+                write_hdf5_csr_matrix(f, "hstatic", self.h_static)
+                write_hdf5_csr_matrix_list(f, "heps", hep_list)
+                write_hdf5_csr_matrix_list(f, "jx", jx)
+                write_hdf5_csr_matrix_list(f, "jy", jy)
             exit()
         return hep_list
 

@@ -5,7 +5,7 @@ import numpy as np
 import h5py
 import os
 
-from pyeph.post_qe2pert.wannier_phonon import assert_trs
+from pyeph.legacy.wannier_phonon import assert_trs
 from pyeph.utils.constants import ryd_to_mev
 from pyeph.lib.setup_jax import configure_jax_backend
 configure_jax_backend()
@@ -49,7 +49,9 @@ def localize_reorganization_energy(
     eph_real,
     freqs,
     delta_re_ws,
-    delta_r_vectors
+    delta_r_vectors,
+    weight=None,
+    mask_tol=1.0
 ):
     freq = jnp.mean(freqs, axis=0)
     inv_omega = 1.0 / freq
@@ -59,12 +61,16 @@ def localize_reorganization_energy(
     
     # apply mask
     reorg_denom = jnp.sum(reorg, axis=-1)
-    mask = reorg_denom * ryd_to_mev > 1
-    reorg = jnp.where(mask[..., None], reorg, 0.0)
+    mask = reorg_denom * ryd_to_mev > mask_tol
     
     # # perform normalization for each hopping, not sure if we want this
-    # inv_reorg_denom = jnp.where(mask, 1.0 / (reorg_denom + 1e-10), 0.0)
-    # reorg = jnp.einsum('ijer, ije->ijer', reorg, inv_reorg_denom)
+    inv_reorg_denom = jnp.where(mask, 1.0 / (reorg_denom + 1e-10), 0.0)
+    reorg = jnp.einsum('ijer, ije->ijer', reorg, inv_reorg_denom)
+
+    reorg = jnp.where(mask[..., None], reorg, 0.0)
+
+    if weight is not None:
+        return jnp.sum(reorg * weight)
 
     reorg = reorg.sum(axis=(0,1)) # (nre, n_delta_rp)
     
