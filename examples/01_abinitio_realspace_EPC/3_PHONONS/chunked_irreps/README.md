@@ -3,6 +3,9 @@
 Use this recovery workflow when one q point cannot complete within a practical job and
 must be divided into complementary irreducible-representation ranges.
 
+Using an LLM for a customized workflow? Start with
+[`LLM_CONTEXT.md`](LLM_CONTEXT.md).
+
 This tutorial has two different support levels:
 
 - QE officially supports GRID-style `dynmat.#q.#irr.xml` calculation and recollection.
