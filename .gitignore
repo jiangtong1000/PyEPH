@@ -11,3 +11,6 @@ notes.md
 wflow.md
 C*.md
 notes/
+
+# Shell scripts in examples are maintained workflow sources, not run artifacts.
+!examples/**/*.sh

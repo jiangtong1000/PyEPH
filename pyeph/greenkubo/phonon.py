@@ -134,20 +134,34 @@ class ClassicalPhononNonlocal(ClassicPhononBath):
         p0_half_real = numpy.zeros((self.nmodes, ntraj, n_half_qpts))
         p0_half_imag = numpy.zeros((self.nmodes, ntraj, n_half_qpts))
         
-        assert self.distribution == "Boltzmann", "Wigner not implemented yet"
-
-        for imode in range(self.nmodes):
-            for iq in range(n_half_qpts):
-                p0_half_real[imode, :, iq] = rng.normal(0, numpy.sqrt(1 / self.beta) / numpy.sqrt(2), (ntraj, ))
-                p0_half_imag[imode, :, iq] = rng.normal(0, numpy.sqrt(1 / self.beta) / numpy.sqrt(2), (ntraj, ))
-                q0_half_real[imode, :, iq] = rng.normal(0, numpy.sqrt(1 / (self.beta * self.w_half[imode, iq]**2)) / numpy.sqrt(2), (ntraj, ))
-                q0_half_imag[imode, :, iq] = rng.normal(0, numpy.sqrt(1 / (self.beta * self.w_half[imode, iq]**2)) / numpy.sqrt(2), (ntraj, ))
+        if self.distribution == "Boltzmann":
+            for imode in range(self.nmodes):
+                for iq in range(n_half_qpts):
+                    p0_half_real[imode, :, iq] = rng.normal(0, numpy.sqrt(1 / self.beta) / numpy.sqrt(2), (ntraj, ))
+                    p0_half_imag[imode, :, iq] = rng.normal(0, numpy.sqrt(1 / self.beta) / numpy.sqrt(2), (ntraj, ))
+                    q0_half_real[imode, :, iq] = rng.normal(0, numpy.sqrt(1 / (self.beta * self.w_half[imode, iq]**2)) / numpy.sqrt(2), (ntraj, ))
+                    q0_half_imag[imode, :, iq] = rng.normal(0, numpy.sqrt(1 / (self.beta * self.w_half[imode, iq]**2)) / numpy.sqrt(2), (ntraj, ))
+                
+            q0_half = q0_half_real + 1j * q0_half_imag
+            p0_half = p0_half_real + 1j * p0_half_imag
             
-        q0_half = q0_half_real + 1j * q0_half_imag
-        p0_half = p0_half_real + 1j * p0_half_imag
-        
-        self.q0_half = numpy.einsum("utq,uq->utq", q0_half, numpy.sqrt(self.w_half * 2))
-        self.p0_half = numpy.einsum("utq,uq->utq", p0_half, numpy.sqrt(2 / self.w_half))
+            self.q0_half = numpy.einsum("utq,uq->utq", q0_half, numpy.sqrt(self.w_half * 2))
+            self.p0_half = numpy.einsum("utq,uq->utq", p0_half, numpy.sqrt(2 / self.w_half))
+        elif self.distribution == "Wigner":
+            for imode in range(self.nmodes):
+                for iq in range(n_half_qpts):
+                    arg = self.beta * self.w_half[imode, iq] / 2
+                    coth_arg = 1.0 / numpy.tanh(arg)
+                    sigma = numpy.sqrt(coth_arg) / numpy.sqrt(2)
+                    q0_half_real[imode, :, iq] = rng.normal(0, sigma, (ntraj, ))
+                    q0_half_imag[imode, :, iq] = rng.normal(0, sigma, (ntraj, ))
+                    p0_half_real[imode, :, iq] = rng.normal(0, sigma, (ntraj, ))
+                    p0_half_imag[imode, :, iq] = rng.normal(0, sigma, (ntraj, ))
+                
+            self.q0_half = q0_half_real + 1j * q0_half_imag
+            self.p0_half = p0_half_real + 1j * p0_half_imag
+        else:
+            raise ValueError(f"Distribution {self.distribution} not supported")
         self.q0_full = self.reciprocal_half_to_full(self.q0_half)
         self.p0_full = self.reciprocal_half_to_full(self.p0_half)
         self.update_position(0)
@@ -200,7 +214,7 @@ class ClassicalPhononNonlocal(ClassicPhononBath):
         # return Xr.reshape(self.nmodes, self.ntraj, -1)
    
 class QuantumPhononBath:
-    def __init__(self, ph_freq, gmat, temperature):
+    def __init__(self, ph_freq, gmat, temperature, band_narrow_only=False):
         """
         ph_freq : (nmodes,) ndarray
             Phonon frequencies for each mode.
@@ -223,7 +237,7 @@ class QuantumPhononBath:
         logger.info(f"Polaron transform prefactor: {self.polaron_prefactor}")
         self.exponents = numpy.array([-2, -1, 0, 1, 2])
         self.sector_weights = numpy.exp(-self.exponents * self.phi0)
-        self.band_narrow_only = False
+        self.band_narrow_only = band_narrow_only
     
     def update_phit(self, t):
         phit = self.g_dimless **2 * (numpy.cos(self.w * t) / numpy.tanh(self.beta * self.w / 2) - 1.0j * numpy.sin(self.w * t))

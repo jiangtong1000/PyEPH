@@ -356,6 +356,7 @@ def build_2d_multiple_Holstein_and_Peierls_model(
     wH = numpy.concatenate([wH_classical, wH_classical, wH_quantum])
     gH = numpy.concatenate([gH_classical, gH_classical, gH_quantum])
     nmodes_H = len(wH)
+    nmodes_H_classical = len(wH_classical)
     
     g1 = get_g_from_deltaV(dJ1 * numpy.abs(J1), wP, temperature)
     g2 = get_g_from_deltaV(dJ2 * numpy.abs(J2), wP, temperature)
@@ -380,6 +381,8 @@ def build_2d_multiple_Holstein_and_Peierls_model(
     )
     garray_1[0, 0, :nmodes_H] = gH
     garray_1[1, 1, :nmodes_H] = gH
+    garray_1[0, 0, nmodes_H_classical:2*nmodes_H_classical] = 0
+    garray_1[1, 1, :nmodes_H_classical] = 0
 
     gmat = {
         (0,0): {

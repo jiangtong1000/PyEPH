@@ -6,8 +6,6 @@ Construct an real-space first-principles EPH Hamiltonian from crystal structure.
 
 ## Workflow Overview
 
-![Workflow Overview](example_1.png)
-
 | Step | Dir | Program | Purpose |
 |------|-----|---------|---------|
 | 0 | `0_VcRelax/` | `pw.x` | lattice + atomic relaxation (optional if already relaxed) |

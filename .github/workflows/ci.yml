@@ -40,6 +40,12 @@ jobs:
         cd pyeph/greenkubo/tests
         python -m pytest -v
 
+    - name: Run chunked phonon workflow tests
+      run: |
+        python -m unittest discover \
+          -s examples/01_abinitio_realspace_EPC/3_PHONONS/chunked_irreps/tests \
+          -v
+
   test-mpi:
     runs-on: ubuntu-latest
     strategy:

@@ -8,7 +8,7 @@
 
 | Parameter | Description |
 |-----------|-------------|
-| `calculation = 'bands'` | NSCF mode |
+| `calculation = 'nscf'` | NSCF mode |
 | `nbnd` |  |
 | K_POINTS | Explicit list in crystal coordinates (no automatic grid) |
 
@@ -17,7 +17,7 @@
 Use the Wannier90 utility:
 
 ```bash
-wannier90/utility/kmesh.pl nk1 nk2 nk3
+q-e-qe-7.3.1/external/wannier90/utility/kmesh.pl nk1 nk2 nk3
 ```
 
 Paste the output into `nscf.in` under `K_POINTS crystal`.

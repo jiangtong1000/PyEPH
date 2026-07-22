@@ -1,14 +1,14 @@
 &inputph
-  verbosity='debug'
-  tr2_ph=1.0d-17                           ! TODO: this has to be this tight
-  prefix='PREFIX'                           ! TODO: same prefix as SCF
-  asr=.true.
+  verbosity='high'
+  tr2_ph=1.0d-12                           ! TODO: converge for this material
+  prefix='PREFIX'                          ! TODO: same prefix as SCF
   ldisp=.true.
-  epsil=.true.
+  epsil=.true.                             ! TODO: remove when not appropriate
   lqdir=.true.
   outdir='./tmp'
-  dftd3_hess='PREFIX.hess'                  ! TODO: remove if no D3; symlink from 2_D3HESS/
-  fildyn  = 'PREFIX.dyn.xml'                ! TODO: replace PREFIX
-  fildvscf = 'dvscf'
-  nq1=2, nq2=2, nq3=2                      ! TODO: q-point grid
+  dftd3_hess='PREFIX.hess'                 ! TODO: remove unless using matching D3
+  fildyn='PREFIX.dyn'
+  fildvscf='dvscf'
+  nq1=2, nq2=2, nq3=2                     ! TODO: coarse q grid
+  ! max_seconds=TODO_SECONDS               ! TODO: stop before scheduler wall time
 /

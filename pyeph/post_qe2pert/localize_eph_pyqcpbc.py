@@ -8,7 +8,7 @@ from typing import Dict, Optional
 from pyqcpbc.OPT import objective_function as qcpbc_objective
 from pyqcpbc.OPT import minimizer as qcpbc_minimizer
 
-from pyeph.post_qe2pert.wannier_phonon import assert_trs
+from pyeph.legacy.wannier_phonon import assert_trs
 from pyeph.utils.constants import ryd_to_mev
 from pyeph.lib.setup_jax import configure_jax_backend
 from pyeph.post_qe2pert.localize_eph import zero_out_negative_freqs, compute_density
@@ -28,11 +28,13 @@ def compute_eph_mat_real_space_pyqcpbc(
     q_minus,
     partner_hbz_for_minus,
     fname,
+    weight=None,
     rph_shell_radius=2,
     phfreq_cutoff=1.5 / ryd_to_mev,
     max_iter=200,
     tol=1e-9,
-    algorithm="l_bfgs_ls"
+    algorithm="l_bfgs_ls",
+    mask_tol=1.0 # in meV
 ):
     """
     Localize e-ph matrix elements by minimizing their spatial spread using pyqcpbc.
@@ -115,7 +117,7 @@ def compute_eph_mat_real_space_pyqcpbc(
                 eph_mixed = jnp.einsum("veq, qvu->euq", eph_raw_rot[iw, jw], rotated_eigvecs)
                 block = jnp.einsum("euq, rq->eru", eph_mixed, exp_iq_r_shell)
                 eph_real = eph_real.at[iw, jw].set(block)
-                eph_real = eph_real.at[jw, iw].set(block)
+                # eph_real = eph_real.at[jw, iw].set(block)
         return eph_real
     
     params_zeros = jnp.zeros_like(params_hbz)
@@ -145,7 +147,7 @@ def compute_eph_mat_real_space_pyqcpbc(
         """
         from pyeph.post_qe2pert.localize_eph import localize_reorganization_energy
         eph_real = compute_eph_real(param_array)
-        loss = localize_reorganization_energy(eph_real, freqs, re_ws_vectors, delta_r_vectors)
+        loss = localize_reorganization_energy(eph_real, freqs, re_ws_vectors, delta_r_vectors, weight=weight, mask_tol=mask_tol)
         return loss
         # p, r = compute_density(eph_real, delta_r_vectors) # p: (nr, nmodes), r: (nr, )
         # second_moment = jnp.einsum('ru, r->u', p, r**2)
@@ -196,9 +198,11 @@ def compute_eph_mat_real_space_pyqcpbc(
                         del f["best_p"]
                         del f['eph_real']
                         del f["eph_real_shell"]
+                        del f['best_params_vec']
                     f.create_dataset("best_p", data=best_p)
                     f.create_dataset("eph_real", data=eph_real)
                     f.create_dataset("eph_real_shell", data=eph_real_shell)
+                    f.create_dataset("best_params_vec", data=self.params_vec)
                     
         def get_value(self):
             self._evaluate()

@@ -1,0 +1,15 @@
+&inputph
+  prefix='@PREFIX@'
+  outdir='./tmp'
+  verbosity='high'
+  tr2_ph=1.0d-12
+  ldisp=.true.
+  recover=.true.
+  lqdir=.true.
+  fildyn='@PREFIX@.dyn'
+  fildvscf='dvscf'
+@DFTD3_HESS_LINE@
+  nq1=TODO_NQ1, nq2=TODO_NQ2, nq3=TODO_NQ3
+  start_q=@Q_INDEX@, last_q=@Q_INDEX@
+  start_irr=@START_IRR@, last_irr=@LAST_IRR@
+/
