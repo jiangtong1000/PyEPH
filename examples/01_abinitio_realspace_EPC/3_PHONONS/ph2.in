@@ -1,15 +1,15 @@
 &inputph
-  verbosity='debug'
-  tr2_ph=1.0d-17                           ! TODO: this has to be this tight
-  prefix='PREFIX'                           ! TODO: same prefix
-  asr=.true.
-  recover=.true.                            ! <<< recover mode to merge q-point data
+  verbosity='high'
+  tr2_ph=1.0d-12                           ! TODO: identical to converged ph.in
+  prefix='PREFIX'                          ! TODO: same prefix as SCF
+  recover=.true.
   ldisp=.true.
-  epsil=.true.
+  epsil=.true.                             ! TODO: same choice as ph.in
   lqdir=.true.
   outdir='./tmp'
-  dftd3_hess='PREFIX.hess'                  ! TODO: remove if no D3
-  fildyn  = 'PREFIX.dyn.xml'                ! TODO: replace PREFIX
-  fildvscf = 'dvscf'
-  nq1=2, nq2=2, nq3=2                      ! TODO: q-point grid (same as ph.in)
+  dftd3_hess='PREFIX.hess'                 ! TODO: same choice as ph.in
+  fildyn='PREFIX.dyn'
+  fildvscf='dvscf'
+  nq1=2, nq2=2, nq3=2                     ! TODO: exactly the ph.in q grid
+  ! max_seconds=TODO_SECONDS               ! TODO: stop before scheduler wall time
 /

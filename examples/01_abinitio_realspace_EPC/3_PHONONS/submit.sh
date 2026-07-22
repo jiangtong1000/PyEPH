@@ -1,31 +1,44 @@
 #!/bin/bash
 #SBATCH --job-name=phonon
+#SBATCH --account=TODO_ACCOUNT
 #SBATCH --partition=TODO_PARTITION
 #SBATCH --time=72:00:00
-#SBATCH --ntasks=192                        # TODO: adjust (= ni * total cores used in SCF)
+#SBATCH --ntasks=TODO_NTASKS
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=500GB
-#SBATCH --output=ph.out
-#SBATCH --error=ph.err
-#SBATCH --mail-type=ALL
-#SBATCH --mail-user=TODO_EMAIL
+#SBATCH --mem=TODO_MEMORY
+#SBATCH --output=phonon.slurm.out
+#SBATCH --error=phonon.slurm.err
 
-source ~/.bashrc
-ulimit -s unlimited
+set -euo pipefail
+cd "${SLURM_SUBMIT_DIR:?}"
 
-source TODO_ENV_SCRIPT
+: "${QE_ENV:?Export QE_ENV as the QE environment setup script}"
+: "${NIMAGE:?Export NIMAGE after inspecting the irreducible q list}"
+: "${NPOOL:?Export NPOOL consistently with the SCF calculation}"
+source "$QE_ENV"
 
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export MKL_NUM_THREADS=$OMP_NUM_THREADS
+echo "date=$(date --iso-8601=seconds)"
+echo "host=$(hostname) job=${SLURM_JOB_ID:-none} tasks=${SLURM_NTASKS:-none}"
+echo "ph.x=$(command -v ph.x)"
 
-# Heavy DFPT calculation
-# -ni 8: parallelize over 8 q-points (images); adjust to match your q-grid
-# -nk 8: k-point pools per image, has to be consistent with SCF
+case "$NIMAGE:$NPOOL" in
+  *[!0-9:]*|:*|*:) echo "NIMAGE and NPOOL must be positive integers" >&2; exit 2 ;;
+esac
+if [ "$NIMAGE" -lt 1 ] || [ "$NPOOL" -lt 1 ]; then
+  echo "NIMAGE and NPOOL must be positive integers" >&2
+  exit 2
+fi
+parallel_factor=$((NIMAGE * NPOOL))
+if (( SLURM_NTASKS % parallel_factor != 0 )); then
+  echo "SLURM_NTASKS must be divisible by NIMAGE * NPOOL" >&2
+  exit 2
+fi
 
-# Try to run with mpirun -np 24 ph.x -nk 8 < ph.in > ph.out
-# Then check the output file to see how many irreducible q-points are used
-# This gives us how to set the -ni parameter
-mpirun -np 192 ph.x -ni 8 -nk 8 < ph.in > ph.out
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
+export MKL_NUM_THREADS="$OMP_NUM_THREADS"
 
-# Fast merge: 24 ranks, no -ni, recover=.true.
-mpirun -np 24 ph.x -nk 8 < ph2.in > ph2.out
+# Main q-point-distributed calculation. NIMAGE need not equal the q-point count.
+srun ph.x -ni "$NIMAGE" -nk "$NPOOL" -in ph.in > ph.out
+
+# Final single-image recollection. This runs only after the main command succeeds.
+srun ph.x -nk "$NPOOL" -in ph2.in > ph2.out

@@ -1,0 +1,25 @@
+{
+  "record_bytes": "REPLACE_WITH_VERIFIED_RECORD_BYTES",
+  "total_modes": "REPLACE_WITH_TOTAL_MODES",
+  "output": "/new/path/PREFIX.dvscf1",
+  "provenance": {
+    "qe_version": "REPLACE_WITH_QE_VERSION",
+    "qe_executable_sha256": "REPLACE_WITH_SHA256",
+    "pattern_sha256": "REPLACE_WITH_SHA256",
+    "scf_xml_sha256": "REPLACE_WITH_SHA256"
+  },
+  "segments": [
+    {
+      "label": "original",
+      "path": "/path/to/original.partial.dvscf1",
+      "first_mode": 1,
+      "last_mode": "REPLACE_WITH_BASE_LAST_MODE"
+    },
+    {
+      "label": "chunk1",
+      "path": "/path/to/chunk1/PREFIX.dvscf1",
+      "first_mode": "REPLACE_WITH_CHUNK_FIRST_MODE",
+      "last_mode": "REPLACE_WITH_CHUNK_LAST_MODE"
+    }
+  ]
+}
