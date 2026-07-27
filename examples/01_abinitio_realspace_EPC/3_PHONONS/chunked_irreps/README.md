@@ -107,7 +107,9 @@ python3 make_chunks.py \
 
 Remove `--shared-hess` when D3 is not used. Remove `--dry-run` only after checking the
 plan. Review every generated `ph.in` and `submit.sh`; scheduler account, resources,
-pool count, environment, and wall time are calculation-specific.
+pool count, environment, wall time, and any material-specific convergence settings are
+calculation-specific. The committed template preserves the validated `tr2_ph=1.0d-17`,
+`asr=.true.`, and `epsil=.true.` settings from the parent example.
 
 The generator writes `chunk.json` inside each worker and `chunks.q3.json` beside the
 workers. Retain both as provenance.

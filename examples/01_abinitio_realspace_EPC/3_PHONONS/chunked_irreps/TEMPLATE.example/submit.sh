@@ -29,4 +29,3 @@ fi
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-1}"
 export MKL_NUM_THREADS="$OMP_NUM_THREADS"
 srun ph.x -nk "$NPOOL" -in ph.in
-

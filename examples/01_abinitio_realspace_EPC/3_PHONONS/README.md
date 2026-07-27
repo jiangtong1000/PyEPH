@@ -23,14 +23,14 @@ image count, and k-point pools must be chosen for the target calculation and clu
 |---------|----------|
 | `prefix`, `outdir` | Must refer to the matching SCF calculation. |
 | `nq1`, `nq2`, `nq3` | Coarse q grid used by the downstream Perturbo workflow. |
-| `tr2_ph` | Converge for the material; `1d-12` is the QE default, not a universal answer. |
+| `tr2_ph` | Use the validated tight threshold for this example, `1.0d-17`; looser values have produced spurious negative modes in this workflow. See [QE issue/work item #385](https://gitlab.com/QEF/q-e/-/work_items/385). |
 | `epsil` | Use only where dielectric/Born-charge calculations are appropriate. |
 | `dftd3_hess` | Keep only when the SCF uses the matching D3 correction and Hessian. |
 | `fildvscf` | Required for the perturbation data consumed downstream. |
 | `max_seconds` | Set below the scheduler wall time to give QE time to stop cleanly. |
 
-Do not use `asr` or an unusually tight `tr2_ph` as a generic fix for unstable modes.
-Test the physical and numerical convergence of the calculation.
+Keep `asr=.true.` and the tight `tr2_ph` setting unless you have rerun convergence
+checks for the target material.
 
 ## Q-point images are not q-point count
 

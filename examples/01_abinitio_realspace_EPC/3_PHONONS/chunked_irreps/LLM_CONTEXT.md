@@ -13,6 +13,8 @@ Use this technical model:
 - Merging partial-irrep dvscf files is an advanced, version-specific extension.
 - dvscf records follow cumulative mode numbers, not irrep numbers.
 - Workers must share identical displacement patterns and compatible QE/SCF provenance.
+- Preserve the validated parent-example phonon parameters, including `tr2_ph=1.0d-17`
+  and `asr=.true.`, unless I explicitly provide newer convergence evidence.
 - File size alone cannot detect sparse, zero, missing, or incorrect records.
 - Q-point, image, irrep, and mode counts are different quantities.
 - QE build, FFT layout, PAW/spin configuration, scheduler, and filesystem behavior may

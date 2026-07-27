@@ -1,12 +1,14 @@
 &inputph
   prefix='@PREFIX@'
   outdir='./tmp'
-  verbosity='high'
-  tr2_ph=1.0d-12
+  verbosity='debug'
+  tr2_ph=1.0d-17
+  asr=.true.
   ldisp=.true.
+  epsil=.true.
   recover=.true.
   lqdir=.true.
-  fildyn='@PREFIX@.dyn'
+  fildyn='@PREFIX@.dyn.xml'
   fildvscf='dvscf'
 @DFTD3_HESS_LINE@
   nq1=TODO_NQ1, nq2=TODO_NQ2, nq3=TODO_NQ3

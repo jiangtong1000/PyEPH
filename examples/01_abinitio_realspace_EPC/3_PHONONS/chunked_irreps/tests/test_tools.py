@@ -159,6 +159,7 @@ class ToolTests(unittest.TestCase):
             self.assertIn("start=5 last=7", (output / "chunk1" / "ph.in").read_text())
             self.assertIn("start=8 last=9", (output / "chunk2" / "ph.in").read_text())
             self.assertEqual((output / "chunk1" / "tmp" / "sample.save").resolve(), shared_save)
+            self.assertEqual((output / "chunk1" / "sample.hess").resolve(), shared_hess)
             self.assertTrue((output / "chunks.q2.json").is_file())
             plan = json.loads((output / "chunks.q2.json").read_text())
             self.assertIn("scf_xml_sha256", plan["template_provenance"])
