@@ -225,7 +225,7 @@ def build_chunk(
     save_link = tmp / f"{prefix}.save"
     save_link.symlink_to(shared_save)
     if shared_hess is not None:
-        (tmp / f"{prefix}.hess").symlink_to(shared_hess)
+        (destination / f"{prefix}.hess").symlink_to(shared_hess)
 
     metadata = {
         "prefix": prefix,

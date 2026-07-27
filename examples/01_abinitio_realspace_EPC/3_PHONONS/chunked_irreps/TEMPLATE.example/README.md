@@ -2,7 +2,8 @@
 
 This example is intentionally incomplete and must not be submitted directly.
 
-1. Replace `TODO_NQ*` in `ph.in` with the real q grid and use the converged `tr2_ph`.
+1. Replace `TODO_NQ*` in `ph.in` with the real q grid and keep the validated parent
+   phonon settings unless you have rerun convergence checks.
 2. Copy the real preparatory-run `dyn0` to `PREFIX.dyn0`.
 3. Copy the real SCF XML to `tmp/PREFIX.xml`.
 4. Copy all real preparatory-run patterns to
