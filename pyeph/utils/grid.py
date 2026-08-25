@@ -1,5 +1,25 @@
 import numpy as np
 
+def uniform_grid_zfast(kmesh):
+    """
+    Uniform Gamma-first grid over [0,1)^3, flat C order with z fastest,
+    ik = (ix*n2 + iy)*n3 + iz. Same convention as mini_dd2.Lattice and the
+    kmesh.py kpt lists. Returns (kpts (Nk,3), grid_index (Nk,3)).
+    """
+    n1, n2, n3 = (int(v) for v in kmesh)
+    ix, iy, iz = np.meshgrid(np.arange(n1), np.arange(n2), np.arange(n3),
+                             indexing='ij')
+    grid_index = np.stack([ix.ravel(), iy.ravel(), iz.ravel()], axis=1).astype(np.int64)
+    kpts = grid_index / np.array([n1, n2, n3], dtype=float)
+    return kpts, grid_index
+
+def minus_index_map(kmesh):
+    """Flat index of -k (mod mesh) for every point of the z-fastest grid."""
+    kmesh = np.asarray(kmesh, dtype=np.int64).ravel()
+    _, grid_index = uniform_grid_zfast(kmesh)
+    idx = np.mod(-grid_index, kmesh)
+    return (idx[:, 0] * kmesh[1] + idx[:, 1]) * kmesh[2] + idx[:, 2]
+
 def rgrid_2d_full(Nx, Ny):
     rx = np.arange(-Nx//2, -Nx//2 + Nx, dtype=int)  # [-Nx/2, ..., Nx/2-1] (even) or symmetric (odd)
     ry = np.arange(-Ny//2, -Ny//2 + Ny, dtype=int)
