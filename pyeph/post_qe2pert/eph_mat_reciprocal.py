@@ -16,7 +16,8 @@ class CalcEphMatReciprocal(PostQE2Pert):
         self.logger = setup_logger("calc_eph_mat_reciprocal", level="DEBUG" if verbose else "INFO")
         
         # Initialize phonon and electron calculations
-        self.phonon_calc = PhononDispersion(epr_file, verbose)
+        # Preserve the EPR polar setting independently of logging verbosity.
+        self.phonon_calc = PhononDispersion(epr_file, polar=None, verbose=verbose)
         self.electron_calc = ElectronBands(epr_file, verbose)
         
         # Extract e-ph matrix elements and setup

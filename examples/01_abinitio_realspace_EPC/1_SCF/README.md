@@ -5,8 +5,7 @@
 **Purpose:** Self-consistent field calculation with relaxed geometry on a coarse k-grid to get the density.
 
 ## Notes on parameters
-- `forc_conv_thr = 1.0d-5` we might need a tight enough force convergence threshold for subsequent phonon calculations.
-- `nstep = 200`, same as above, enough steps
+- `calculation = 'scf'`: use the already relaxed geometry from Step 0. Force and cell convergence thresholds belong to that relaxation step.
 - `ibrav = 0`, just let QE figure out the symmetry by itself
 - `ecutrho=4*ecutwfc`, the charge density cutoff should be 4 times the wavefunction cutoff
 - `dftd3_threebody = .false.`, since the hessian is not supported

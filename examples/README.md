@@ -8,4 +8,4 @@ Workflows for electron-phonon coupling modeling and dynamics simulation.
 | # | Example | Description |
 |---|----------|-------------|
 | 01 | [Build Hamiltonian](01_abinitio_realspace_EPC/) | Full QE → Perturbo → PyEPH workflow to construct the first-principles e-ph Hamiltonian in Wannier basis |
-| 02 | Dynamics Simulation | *(to be added)* |
+| 02 | [Holstein dynamics](02_holstein/) | Self-contained serial or MPI model simulation with expected-output checks |

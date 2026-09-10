@@ -34,11 +34,16 @@ jobs:
         cd pyeph/post_qe2pert/test
         python -m pytest test_ph_disp.py::test_phonon_dispersion -v
         python -m pytest test_electron_band.py::test_electron_bands -v
+        USE_MPI=false python -m pytest test_eph_mat.py::test_ephmat -v
     
     - name: Run non-MPI tests for greenkubo
       run: |
         cd pyeph/greenkubo/tests
         python -m pytest -v
+
+    - name: Run the documented DNTT extraction demo
+      run: |
+        USE_MPI=false python -m pytest -q pyeph/post_qe2pert/test/test_postprocessing_demo.py
 
     - name: Run chunked phonon workflow tests
       run: |
@@ -82,3 +87,10 @@ jobs:
       run: |
         cd pyeph/post_qe2pert/test
         mpirun --oversubscribe -n 2 python test_ph_disp.py
+
+    - name: Run the DNTT extraction demo with MPI
+      run: |
+        USE_MPI=true mpirun --oversubscribe -n 2 python \
+          examples/01_abinitio_realspace_EPC/7_PolarEPH/run_pyeph.py \
+          --epr-file pyeph/post_qe2pert/test/DNTT_epr.h5 \
+          --nx 2 --ny 2 --output "$RUNNER_TEMP/pyeph_dntt_mpi.h5"
