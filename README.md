@@ -73,7 +73,7 @@ The QCPBC-backed localization routine requires `pyqcpbc.OPT` from QCPBC
 (QC-PBC), proprietary software from [Q-Chem](https://www.q-chem.com/).
 QCPBC is obtained under [Q-Chem's licensing terms](https://www.q-chem.com/purchase/)
 and is not distributed with PyEPH. Contact Q-Chem for access to a compatible
-installation providing the `pyqcpbc.OPT` interface. The Holstein transport and
+installation providing the `pyqcpbc.OPT` interface. The transport and
 DNTT EPR extraction demos do not require QCPBC.
 
 ## Quick validation
