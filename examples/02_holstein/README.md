@@ -48,19 +48,13 @@ for one rank and is not a trajectory-level sampling error estimate. The
 simulation uses base seed 1120, with separate streams for each rank.
 Changing the rank count changes both the random streams and sample count.
 
-## Observed timing
+## Typical timing
 
-An audit on macOS 26.6.2 (arm64), Python 3.12.8 took approximately 28 seconds
-to install the original baseline requirements and 48 seconds to run the
-complete serial demo with single-thread BLAS. This is one observation:
-network, package caching and first-use compilation affect timings. The timed
-installation excluded external electronic-structure programs, MPI and QCPBC,
-and preceded addition of the small `psutil` dependency. CPU model and RAM
-were not recorded; production resource requirements still need documentation.
-
-The audit used NumPy 2.5.3, SciPy 1.18.1, h5py 3.16.0 and Numba 0.67.0.
-The observed `current_x[0]` was `0.6567366510024867+0j`; it has not been
-established as a cross-platform numerical reference.
+Allow approximately one minute to install the Python dependencies and one
+minute to run the serial demo on a desktop CPU. Installation time depends on
+network conditions and package caches; runtime also depends on first-use
+compilation and thread settings. These estimates exclude external
+electronic-structure programs, MPI and QCPBC.
 
 ## MPI
 
