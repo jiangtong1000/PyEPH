@@ -150,13 +150,19 @@ The post-processing suite checks electronic bands, phonon dispersion, EPC
 reference values and the DNTT extraction example. Reciprocal-space EPC
 calculations use the polar setting stored in the input EPR file.
 
-The serial tests and demos have been exercised on macOS 26.6.2 (arm64),
-Python 3.12.8, NumPy 2.5.3, SciPy 1.18.1, h5py 3.16.0, Numba 0.67.0 and
-JAX/jaxlib 0.11.1. CI targets Python 3.10 on Ubuntu and includes MPI checks.
+Serial and MPI tests pass on Linux (Ubuntu 24.04) with Python 3.10.
+Tested Python dependency versions are listed in [requirements-tested.txt](requirements-tested.txt).
+The MPI tests use Open MPI 4.1.6 and mpi4py 4.1.2.
 
 ## Development status
 
 PyEPH is active research software. The version-controlled workflows and regression tests document the behavior used in current studies, while the Python API may continue to evolve. For archival calculations, record the exact Git commit and retain all input files, dependency versions, random seeds, and scheduler settings.
+
+## License
+
+PyEPH is distributed under the [BSD 3-Clause License](LICENSE).
+Third-party dependencies retain their own licenses; QCPBC is licensed separately
+by Q-Chem and is not distributed with PyEPH.
 
 ## Citation
 
