@@ -55,6 +55,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 
 export PYTHONPATH="$PWD:${PYTHONPATH:-}"
+export USE_MPI=false
 python -c "import pyeph; print('PyEPH import successful')"
 ```
 
@@ -63,9 +64,17 @@ For MPI execution, install an MPI implementation on the system and use the MPI d
 ```bash
 python -m pip install -r requirements-mpi.txt
 mpirun --version
+export USE_MPI=true
 ```
 
 The first-principles workflow additionally requires Quantum ESPRESSO, Wannier90, and PERTURBO. Their versions and runtime configuration should be kept consistent across all workflow stages.
+
+The QCPBC-backed localization routine requires `pyqcpbc.OPT` from QCPBC
+(QC-PBC), proprietary software from [Q-Chem](https://www.q-chem.com/).
+QCPBC is obtained under [Q-Chem's licensing terms](https://www.q-chem.com/purchase/)
+and is not distributed with PyEPH. Contact Q-Chem for access to a compatible
+installation providing the `pyqcpbc.OPT` interface. The Holstein transport and
+DNTT EPR extraction demos do not require QCPBC.
 
 ## Quick validation
 
@@ -82,10 +91,14 @@ The included Holstein example runs a Green–Kubo transport calculation and writ
 
 ```bash
 cd examples/02_holstein
-python run.py 0
+USE_MPI=false python run.py 0
 ```
 
 The command-line argument selects a temperature from the list defined in `run.py`. Production calculations can be launched with the accompanying Slurm template and MPI.
+
+See the [demo instructions](examples/02_holstein/README.md) for expected-output
+checks, observed timing and MPI execution. The serial demo generates its own
+model inputs and requires no electronic-structure program or separate dataset.
 
 ## First-principles workflow
 
@@ -99,6 +112,17 @@ The complete ab initio workflow is documented in [`examples/01_abinitio_realspac
 6. real-time dynamics and transport analysis.
 
 The example inputs are templates rather than universal production settings. Convergence thresholds, reciprocal-space grids, pseudopotentials, and parallelization parameters must be validated for each material.
+
+A small DNTT post-processing input (q222, k222; approximately 4.17 MB) is included at
+`pyeph/post_qe2pert/test/DNTT_epr.h5`. Follow the
+[Step 7 demo](examples/01_abinitio_realspace_EPC/7_PolarEPH/README.md) to extract
+real-space EPC data and phonon modes without rerunning DFT or DFPT. This prepares
+data for localization; it does not run QCPBC or a complete transport calculation.
+
+A larger [DNTT EPR input (q332, k664; 43.97 MiB)](https://github.com/JoonhoLee-Group/first-principles-transport-data/tree/master/data/epr/DNTT/q332_k664)
+is provided in the companion data repository, with dataset parameters and
+a runnable extraction example. Its file and cell differ from the bundled
+q222/k222 test fixture.
 
 ## Repository structure
 
@@ -122,6 +146,14 @@ python -m pytest -q pyeph/greenkubo/tests
 python -m pytest -q pyeph/post_qe2pert/test
 ```
 
+The post-processing suite checks electronic bands, phonon dispersion, EPC
+reference values and the DNTT extraction example. Reciprocal-space EPC
+calculations use the polar setting stored in the input EPR file.
+
+The serial tests and demos have been exercised on macOS 26.6.2 (arm64),
+Python 3.12.8, NumPy 2.5.3, SciPy 1.18.1, h5py 3.16.0, Numba 0.67.0 and
+JAX/jaxlib 0.11.1. CI targets Python 3.10 on Ubuntu and includes MPI checks.
+
 ## Development status
 
 PyEPH is active research software. The version-controlled workflows and regression tests document the behavior used in current studies, while the Python API may continue to evolve. For archival calculations, record the exact Git commit and retain all input files, dependency versions, random seeds, and scheduler settings.
@@ -130,6 +162,7 @@ PyEPH is active research software. The version-controlled workflows and regressi
 
 This repository accompanies the following manuscript:
 
-> Tong Jiang and Joonho Lee, “First-Principles Origins of Charge Transport in Molecular Semiconductors,” submitted (2026).
+> Tong Jiang and Joonho Lee, “First-Principles Origins of Charge Transport in Molecular Semiconductors” (2026), [arXiv:2607.25089](https://arxiv.org/abs/2607.25089).
 
-which is currently under review and does not yet have a public preprint or DOI yet.
+First-principles EPR input, processed figure data and plotting notebooks are available in
+[first-principles-transport-data](https://github.com/JoonhoLee-Group/first-principles-transport-data).

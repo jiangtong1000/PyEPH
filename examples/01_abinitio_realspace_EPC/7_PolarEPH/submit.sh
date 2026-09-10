@@ -20,4 +20,5 @@ conda activate shadow                       # TODO: conda environment with PyEPH
 export PYTHONPATH=TODO_PYEPH_PATH:$PYTHONPATH  # TODO: path to PyEPH package
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
-python -u run_pyeph.py > pert.out
+export USE_MPI=true
+mpirun -np "$SLURM_NTASKS" python -u run_pyeph.py > pert.out
