@@ -29,6 +29,7 @@ benchmarks/reduced_space_error.py
 benchmarks/thermal_columns.py
 benchmarks/thermal_columns_sparse.py
 benchmarks/thermal_filter_prototype.py
+benchmarks/windowed_sensitivities.py
 docs/AB_INITIO_EPC.md
 docs/ADDING_METHODS.md
 docs/ADDING_MODELS.md
@@ -374,6 +375,7 @@ tests/test_torch_reference.py
 tests/test_transport.py
 tests/test_transport_action_estimator.py
 tests/test_transport_workflow.py
+tests/test_windowed_sensitivities.py
 tests/test_zero_temperature_restart.py
 tools/qualify_distribution.py
 tools/release.py

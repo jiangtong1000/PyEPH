@@ -1,5 +1,22 @@
 # Changes
 
+## 0.1.0.dev2
+
+- Correct host neighbor coverage at floating-point boundaries using exact
+  float-input geometry. Check periodic search budgets before allocation and
+  verify candidate completeness after coordinate rewrapping.
+- Preserve byte-string geometry IDs through fitting reports and dynamics
+  initialization. Verify and decode one parameter-file snapshot during legacy
+  artifact loading.
+- Add a generated neural-Hamiltonian benchmark for full-gradient windowed
+  losses, independent discrete references and short-horizon Hessian-vector
+  checks. It adds no new runtime API or material-accuracy claim.
+- Record source-specific installed CPU, CI and accelerator qualification.
+
+Host coverage checks remain separate from automatic guarding of internal
+dynamics stages. Earlier qualification does not silently apply to changed
+runtime files; see [qualification scope](docs/QUALIFICATION.md).
+
 ## 0.1.0.dev1
 
 This development version extends the modular dynamics core while retaining the

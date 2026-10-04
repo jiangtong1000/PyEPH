@@ -47,7 +47,7 @@ another shared abstraction.
 | Long trajectory campaigns | Persistent local claims, fenced retries and deterministic result merges | Add within-unit continuation and scheduler integration only with explicit checkpoint and filesystem contracts |
 | Learned models | A small dense fixed-basis label profile, family splits, model bundles, revalidation and sampled domain diagnostics | Add provider-owned local/block label readers and two qualified application training workflows, retaining charge-state, basis and complete-force evidence |
 | Atomic candidate graphs | Periodic construction, motion checks and explicit rebuild lineage | Implement the narrowly scoped [stage guard and recovery design](docs/NEIGHBOR_GUARD_DESIGN.md) |
-| Smooth sensitivities | Pure CPA/Ehrenfest RK4 rollouts, shared host span validation and a small independently referenced calibration example | Qualify windowed observable losses, memory use and force/parameter derivatives for real learned providers |
+| Smooth sensitivities | Pure CPA/Ehrenfest RK4 rollouts, shared host span validation, generated-model calibration and full-gradient window benchmarks with independent derivatives | Extend windowed losses and force/parameter derivative qualification to the application providers; measure actual memory and long-time conditioning |
 
 Performance qualification must follow each method's actual operations. Sparse
 or action-based CPA/Ehrenfest does not remove the complete-spectrum requirement

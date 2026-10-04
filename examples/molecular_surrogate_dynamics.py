@@ -244,7 +244,7 @@ def main():
     if metadata["arrays_sha256"] != report["dataset"]["arrays_sha256"]:
         raise ValueError("dynamics dataset differs from the fitted artifact")
     initial_id = report["splits"]["test"][0]
-    row = list(arrays["geometry_ids"]).index(initial_id)
+    row = arrays["geometry_ids"].astype(str).tolist().index(initial_id)
     args.output.mkdir(parents=True, exist_ok=False)
     artifact_ids = dict(model=report["parameters_sha256"], dataset=metadata["arrays_sha256"],
                         dynamics=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())

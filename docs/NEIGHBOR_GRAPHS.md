@@ -82,7 +82,7 @@ np.testing.assert_allclose(restored, q)
 ```
 
 `rewrapped` changes the reference coordinates and graph images together,
-preserving candidate order and physical displacements. It returns a new
+preserving candidate order and intended physical displacements. It returns a new
 generation with parent identity only after a complete host search confirms that
 the translated float64 reference geometry still has every required candidate.
 Translation rounding can move an omitted pair across the list boundary; that
@@ -118,11 +118,12 @@ its own numerical margin and provider contract; see
 than ordinary floating distance checks and remain an explicitly bounded host
 operation, outside compiled propagation. No fast neighbor-update claim follows.
 
-`check(q)` returns displacement and skin evidence. `covered=True` means the
-skin proves current coverage; `covered=None` means the certificate expired
-and no exhaustive search was requested. `check(q, exhaustive=True)` searches
+`check(q)` returns displacement and skin evidence. Without an exhaustive search,
+`covered=True` means the skin proves current coverage; `covered=None` means the
+certificate expired. `check(q, exhaustive=True)` searches
 all current physical pairs and reports the exact missing edge tuples, or an
-empty tuple if this geometry is covered. An expired skin and an omitted edge
+empty tuple and `covered=True` if this geometry is covered, even if the skin
+has expired. An expired skin and an omitted edge
 are different diagnostics. `require_coverage` raises `NeighborCoverageError`
 when the skin expires, retaining the report even if exhaustive search happens
 to find no missing pair at that instant.

@@ -275,7 +275,7 @@ def test_recomputed_force_allowance_does_not_weaken_parameter_or_field_checks():
 
 @pytest.mark.parametrize("byte_ids", [False, True])
 def test_cli_report_normalizes_geometry_ids_without_changing_label_identity(tmp_path, monkeypatch, byte_ids):
-    """Run the actual report/export path; fitting itself is outside this regression."""
+    """Exercise report/export and dynamics selection; numerical fitting/run is stubbed."""
     from pyeph.learning import bundle_identity, load_labels, save_bundle
 
     models, params, q = fixture()
@@ -287,6 +287,9 @@ def test_cli_report_normalizes_geometry_ids_without_changing_label_identity(tmp_
                   neutral_energy=np.zeros(3), neutral_force=np.zeros((3, 12, 3)),
                   species=np.array([6, 6, 1, 1, 1, 1]*2), fragment=np.repeat([0, 1], 6),
                   geometry_ids=ids, groups=groups)
+    # Distinct coordinates ensure the dynamics path chooses the held-out row.
+    arrays["q"][1, :, 0] += .1
+    arrays["q"][2, :, 0] += .2
     payload = tmp_path/"labels.npz"
     np.savez(payload, **arrays)
     payload_before = payload.read_bytes()
@@ -327,6 +330,24 @@ def test_cli_report_normalizes_geometry_ids_without_changing_label_identity(tmp_
     assert bundle["contract"]["dataset_sha256"] == bundle_identity(checked_metadata)
     for name, values in report["splits"].items():
         assert values == bundle["validation"]["label_report"]["splits"][name]["geometry_ids"]
+    selected = []
+
+    def record_selection(problem, initial, output, **kwargs):
+        selected.append(np.asarray(initial.q))
+        assert kwargs["artifact_metadata"]["dataset"] == metadata["arrays_sha256"]
+        return dict(method=type(problem.method).__name__.lower())
+
+    monkeypatch.setattr(dynamics, "run_case", record_selection)
+    dynamics_output = tmp_path/"dynamics-report"
+    monkeypatch.setattr(sys, "argv", ["molecular_surrogate_dynamics.py", str(output/"report.json"),
+                                      str(manifest), "--output", str(dynamics_output)])
+    dynamics.main()
+    dynamics_report = json.loads((dynamics_output/"report.json").read_text())
+    assert dynamics_report["initial_geometry_id"] == expected_ids[2]
+    assert [case["method"] for case in dynamics_report["cases"]] == ["cpa", "ehrenfest"]
+    assert len(selected) == 2
+    for q_selected in selected:
+        np.testing.assert_array_equal(q_selected, arrays["q"][2])
     assert payload.read_bytes() == payload_before
     assert manifest.read_bytes() == manifest_before
     reloaded, _ = load_labels(manifest)
@@ -334,3 +355,42 @@ def test_cli_report_normalizes_geometry_ids_without_changing_label_identity(tmp_
     assert reloaded["geometry_ids"].tobytes() == ids.tobytes()
     assert old_bundle.read_bytes() == old_bytes
     assert json.loads(old_bytes)["identity"] == existing["identity"]
+
+
+def test_legacy_artifact_loads_the_checksum_verified_snapshot(tmp_path, monkeypatch):
+    models, params, _ = fixture()
+    payload = tmp_path / "parameters.npz"
+    schema = example.save_parameters(payload, params)
+    original_bytes = payload.read_bytes()
+    original_digest = hashlib.sha256(original_bytes).hexdigest()
+    changed = (params[0], params[1], params[2] | dict(offset=params[2]["offset"] + 1.))
+    replacement = tmp_path / "replacement.npz"
+    example.save_parameters(replacement, changed)
+    replacement_bytes = replacement.read_bytes()
+    assert hashlib.sha256(replacement_bytes).hexdigest() != original_digest
+    record = dict(artifact_schema=example.ARTIFACT_SCHEMA,
+                  dataset=dict(basis_id="test:ordered-ethylene"), training=dict(hidden=8),
+                  implementation_hashes=example.implementation_hashes(),
+                  static_configuration=example.static_configuration(models),
+                  parameter_schema=schema, parameters_sha256=original_digest)
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps(record))
+    read_bytes = Path.read_bytes
+    checked_snapshots = []
+
+    def replace_after_read(path):
+        data = read_bytes(path)
+        if path == payload:
+            checked_snapshots.append(hashlib.sha256(data).hexdigest())
+            payload.write_bytes(replacement_bytes)
+        return data
+
+    monkeypatch.setattr(Path, "read_bytes", replace_after_read)
+    _, restored, loaded_report = example.load_artifact(report)
+    assert checked_snapshots == [original_digest]
+    assert read_bytes(payload) == replacement_bytes
+    assert loaded_report["parameters_sha256"] == original_digest
+    assert_exact_parameters(restored, params)
+    # A later call must reject the replacement against the unchanged manifest.
+    with pytest.raises(ValueError, match="parameter checksum mismatch"):
+        example.load_artifact(report)

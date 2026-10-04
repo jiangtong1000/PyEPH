@@ -222,3 +222,63 @@ consistent with its second-order splitting. This demonstrates a complete
 generated-model calibration workflow, not material accuracy, global parameter
 identifiability or a new dynamics method. The local source-bound run archives
 are not distributed; the command above regenerates the protocol.
+
+
+## Full-gradient windows and higher sensitivities
+
+The generated-model benchmark composes fixed-length `DifferentiableRollout`
+windows with `jax.checkpoint` around their carry updates. It accumulates one
+scalar objective and retains the complete state tangent between windows; it
+does not require a new runtime API or a trainer. Run in explicit float64 mode
+and choose a fresh output directory:
+
+```sh
+JAX_ENABLE_X64=1 python benchmarks/windowed_sensitivities.py \
+  --output outputs/windowed_sensitivities_run
+```
+
+The protocol uses a real fixed-orthonormal two-state Hamiltonian: a linear
+spin-boson term plus a generated tanh network with two eight-unit hidden layers.
+There is one canonical normal coordinate with mass 1.4, Hartree energies and
+atomic time. The nuclear reference is
+`V_ref = omega**2 * (Q - Q_eq)**2 / 2`. CPA uses an independently prescribed
+harmonic frequency 0.6; Ehrenfest uses the stated reference and full electronic
+force. These are separate calculations, not identical nuclear trajectories.
+
+For 64, 512 and 2,048 steps at `dt=0.02`, with 16 steps per window, the objective
+averages `(population[1]-0.3)**2 + 0.07*Q**2 + 0.02*P**2` over all positive steps
+and adds `0.03*Q_final**2` once. Each window excludes its initial observation,
+so boundary samples are not counted twice. Clock anchoring changes floating
+association; value and gradient equivalence is tested numerically, not claimed
+bitwise. A deliberately detached-state control preserves the loss value while
+breaking its gradient and must be detected.
+
+At the shortest horizon, the protocol also checks first directional gradients
+and Hessian-vector products with central-difference widths `1e-3` and `5e-4`,
+refinement with a declared floating-point allowance, Hessian symmetry, and
+monolithic/windowed Hessian-vector agreement. An independently coded NumPy tanh
+matrix and analytic coordinate derivative feed an explicit reference using the
+same discrete algorithms: time-dependent electronic RK4 for CPA, and RK4
+half steps around the Ehrenfest velocity-Verlet update. No production force or
+propagator is used by that reference. Its primal and scalar-loss directional
+finite differences provide separate checks. Longer cases test value/gradient
+equivalence only; these checks do not establish continuum accuracy, long-time
+conditioning or material accuracy.
+
+The recorded local CPU run on native Python 3.13 with JAX 0.11.2 passed all six
+cases. At 2,048 steps the largest monolithic/windowed gradient difference was
+`1.06e-15`. Detaching window states changed the short-horizon gradient by about
+70% for CPA and 76% for Ehrenfest while preserving the objective value. These
+numbers concern this generated fixture and stack; the script regenerates its
+own complete numerical record rather than requiring a shipped historical
+record.
+
+Parameters, initial state, directions, finite-difference pairs, HVP arrays,
+source snapshots and hashes are retained. Nonfinite arrays are saved with
+explicit failure diagnostics before rejection. The report includes compiler
+memory estimates for arguments, outputs, aliases and temporary buffers. For
+the tested 2,048-step cases, temporary-buffer estimates changed from 3,294,400
+to 13,824 bytes (CPA) and 6,145,952 to 14,696 bytes (Ehrenfest) between the
+monolithic and windowed versions. These are compiler estimates for this small
+fixture, not process peak RSS, accelerator evidence or a universal scaling
+bound. Raw local timing samples are not performance claims.

@@ -55,13 +55,36 @@ Python 3.13 dependencies. Its wheel SHA256 is
 and source-archive SHA256 is
 `b13a1a3cac8707a30b6e04da57e42e4ef6e9f23c6f98ea928d925176d87e393a`.
 
+The first published dev1 commit,
+`255f6a501b8240de866810ee50c52a65ae285d69`, subsequently passed its
+[complete Linux CI matrix](https://github.com/jiangtong1000/PyEPH/actions/runs/37236870458).
+Each installed-wheel job passed 1972 tests, with eight optional Torch skips
+and four archival expected failures. Python 3.11.16 with the minimum stack
+retained 51 JAX complex-to-real casting warnings; Python 3.12.14 and 3.13.15
+with the current stack reported none. The separate optional-Torch job passed
+its selected adapter/composition tests. Downloaded wheel/source archives and
+qualification records agree on the 141 runtime-file hashes; the runtime
+fingerprint is
+`a70cd826ef81c3fb0e5c68f4edb4d2e781ed88fcdd2afe6fb061ed6f47f26e7b`.
+Archive bytes differ between CI builds, so their individual hashes remain in
+each retained qualification record.
+
 Those passing suites preceded a targeted geometry audit that found host
 neighbor-coverage errors at floating-point boundaries. The dev2 correction uses
 exact float-input geometry for candidate and skin decisions, checks completeness
 after rewrapping, and rejects excessive image searches before allocation. It
 also fixes serialization of valid byte-string geometry IDs in a fitting report.
-Corrected-distribution qualification is in progress. Earlier suite results do
-not silently qualify this changed runtime or establish automatic stage guarding.
+The audited dev2 wheel passed a complete installed Python 3.13.16 suite on
+macOS arm64: 1997 passed, eight optional Torch skips, four archival expected
+failures and no warnings. A new package environment reused the earlier resolved
+numerical dependencies; this was not another fresh dependency resolution.
+Its wheel SHA256 is
+`deafbbc8944faf4e865bd06f93aaab54793ed8fa6a27ac4a88a51f186cb5a6bf`
+and source-archive SHA256 is
+`f9e644a41be223431025fb8b97c9f921df8a8964ef1753066aa45511ed3a8513`.
+Linux CI and accelerator qualification of that corrected distribution remain
+in progress. Earlier suite results do not silently qualify changed runtime
+files or establish automatic stage guarding.
 
 The [CI workflow](../.github/workflows/tests.yml) builds an explicit source
 export and tests its installed wheel on Linux with minimum/current stacks.
@@ -83,8 +106,17 @@ excluded the CPU backend needed by host diagnostics, platform-specific fixture
 startup, overly exact comparisons of recomputed floating-point values, and
 independent-oracle resolution. Corrections preserve exact stored state and
 discrete fields while comparing propagated floating values with declared
-numerical tolerances. The corrected full accelerator suite remains pending;
-do not interpret the smaller workflow checks as a passing full GPU suite.
+numerical tolerances. The later dev1 candidate identified above then passed its
+full installed A100 suite: 1972 tests passed, eight optional Torch imports were
+skipped, four archival tests were expected failures, and no warnings were
+reported. The launch verified a default A100 GPU backend, an available CPU
+backend for host diagnostics, and float64 mode; installed runtime hashes stayed
+unchanged. It used the same `63e60def...` wheel and `b13a1a3c...` source archive
+identified above, with Python 3.12.10 and the current numerical stack.
+
+That full GPU result predates the dev2 host-geometry correction. The corrected
+dev2 distribution has its own pending accelerator suite and matched workflow
+checks; dev1 results do not silently qualify the changed runtime.
 
 ## Acceptance gates and remaining scope
 

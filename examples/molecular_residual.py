@@ -10,6 +10,7 @@ transferable molecular potential or exact AO/moving-basis dynamics.
 import argparse
 from dataclasses import asdict, dataclass
 import hashlib
+import io
 import json
 from pathlib import Path
 import time
@@ -416,10 +417,10 @@ def load_artifact(report_path):
         raise ValueError("molecular residual artifacts require explicit JAX_ENABLE_X64=1")
     if report.get("implementation_hashes") != implementation_hashes():
         raise ValueError("artifact implementation differs; validate and re-export explicitly")
-    payload = path.parent / "parameters.npz"
-    if hashlib.sha256(payload.read_bytes()).hexdigest() != report["parameters_sha256"]:
+    payload = (path.parent / "parameters.npz").read_bytes()
+    if hashlib.sha256(payload).hexdigest() != report["parameters_sha256"]:
         raise ValueError("parameter checksum mismatch")
-    with np.load(payload, allow_pickle=False) as archive:
+    with np.load(io.BytesIO(payload), allow_pickle=False) as archive:
         arrays = {name: archive[name] for name in archive.files}
     schema = report["parameter_schema"]
     if set(arrays) != set(schema) or any(
