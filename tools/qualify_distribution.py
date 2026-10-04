@@ -75,7 +75,9 @@ def main():
     parser.add_argument("--sdist", type=Path, required=True)
     parser.add_argument("--wheel", type=Path, required=True)
     parser.add_argument("--destination", type=Path, required=True)
-    parser.add_argument("--pytest-args", nargs="*", default=["-q"])
+    parser.add_argument("--pytest-args", nargs=argparse.REMAINDER,
+                        default=["-q", "--durations=20"],
+                        help="pytest arguments; place this option last")
     args = parser.parse_args()
     destination = args.destination.resolve()
     destination.mkdir(parents=True, exist_ok=False)
@@ -108,7 +110,11 @@ def main():
                   source_archive_sha256=digest(args.sdist.read_bytes()),
                   qualifier_sha256=digest(Path(__file__).read_bytes()),
                   wheel_sha256=digest(args.wheel.read_bytes()), wheel_metadata=wheel_metadata,
-                  expected_runtime_sha256=runtime, python_executable=sys.executable)
+                  expected_runtime_sha256=runtime, python_executable=sys.executable,
+                  pytest_args=["tests", *args.pytest_args],
+                  pytest_environment={key: os.environ[key] for key in
+                                      ("PYTEST_ADDOPTS", "PYTEST_PLUGINS",
+                                       "PYTEST_DISABLE_PLUGIN_AUTOLOAD") if key in os.environ})
     (destination / "qualification-input.json").write_text(json.dumps(record, indent=2)+"\n")
     # Use isolated Python to remove the invoking checkout and PYTHONPATH. Insert
     # only copied test-support modules, never a runtime source directory.
@@ -147,7 +153,28 @@ record.update(installed_package=str(root), platform=platform.platform(),
 import jax
 record["devices"] = [str(device) for device in jax.devices()]
 import pytest
-code = pytest.main(["tests", *sys.argv[3:]])
+class CollectionRecord:
+    def __init__(self):
+        self.deselected = 0
+        self.selected = []
+        self.collection_finished = False
+
+    def pytest_deselected(self, items):
+        self.deselected += len(items)
+
+    def pytest_collection_finish(self, session):
+        self.selected = [item.nodeid for item in session.items]
+        self.collection_finished = True
+
+selection = CollectionRecord()
+# Pytest can prepend environment/configuration arguments to the supplied list.
+# Preserve the recorded invocation; its additional inputs are recorded above.
+code = pytest.main(list(record["pytest_args"]), plugins=[selection])
+record["pytest_collection"] = dict(
+    finished=selection.collection_finished, selected_count=len(selection.selected),
+    deselected_count=selection.deselected,
+    ordered_nodeids_sha256=hashlib.sha256(json.dumps(
+        selection.selected, ensure_ascii=True, separators=(",", ":")).encode()).hexdigest())
 record["pytest_exit_code"] = int(code)
 record["runtime_unchanged"] = actual == runtime_hashes()
 (support/"qualification.json").write_text(json.dumps(record, indent=2)+"\\n")

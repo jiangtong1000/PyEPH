@@ -12,6 +12,9 @@
   losses, independent discrete references and short-horizon Hessian-vector
   checks. It adds no new runtime API or material-accuracy claim.
 - Record source-specific installed CPU, CI and accelerator qualification.
+- Retain qualification test-selection arguments, relevant environment settings
+  and ordered collection identity. Accept explicit pytest flag passthrough and
+  report slow test phases to guide measured validation-workflow improvements.
 
 Host coverage checks remain separate from automatic guarding of internal
 dynamics stages. Earlier qualification does not silently apply to changed

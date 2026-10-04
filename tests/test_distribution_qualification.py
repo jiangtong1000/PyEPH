@@ -53,6 +53,8 @@ def distribution_fixture(tmp_path):
             "import pyeph\n"
             "def test_record_imported_code():\n"
             "    Path('executed-marker.txt').write_text(str(pyeph.MARKER))\n"
+            "def test_second_probe():\n"
+            "    assert pyeph.MARKER == 1\n"
         ).encode(),
     }
     files["release-files.txt"] = "".join(f"{name}\n" for name in [*files, "release-files.txt"]).encode()
@@ -63,12 +65,18 @@ def distribution_fixture(tmp_path):
             member.size = len(data)
             archive.addfile(member, io.BytesIO(data))
 
-    def qualify():
+    def qualify(*pytest_args, pytest_addopts=None):
         destination = tmp_path / "qualification"
+        environment = {**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"}
+        environment.pop("PYTEST_ADDOPTS", None)
+        environment.pop("PYTEST_PLUGINS", None)
+        if pytest_addopts is not None:
+            environment["PYTEST_ADDOPTS"] = pytest_addopts
         process = subprocess.run(
             [str(executable), str(Path(__file__).resolve().parents[1] / "tools/qualify_distribution.py"),
-             "--sdist", str(source), "--wheel", str(wheel), "--destination", str(destination)],
-            env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+             "--sdist", str(source), "--wheel", str(wheel), "--destination", str(destination),
+             *(["--pytest-args", *pytest_args] if pytest_args else [])],
+            env=environment,
             capture_output=True, text=True, timeout=90,
         )
         return process, destination
@@ -82,8 +90,37 @@ def test_generated_installed_wheel_qualifies_without_runtime_source_tree(distrib
     assert process.returncode == 0, process.stdout + process.stderr
     record = json.loads((destination / "qualification.json").read_text())
     assert record["runtime_unchanged"]
+    assert record["pytest_args"] == ["tests", "-q", "--durations=20"]
+    assert record["pytest_collection"]["finished"]
+    assert record["pytest_collection"]["selected_count"] == 2
+    assert record["pytest_collection"]["deselected_count"] == 0
     assert not (destination / "src").exists()
     assert (destination / "executed-marker.txt").read_text() == "1"
+
+
+@pytest.mark.parametrize("selection_source", ["arguments", "environment"])
+def test_qualification_records_actual_test_selection(distribution_fixture, selection_source):
+    import hashlib
+
+    _, qualify, _, _ = distribution_fixture
+    if selection_source == "arguments":
+        process, destination = qualify("-q", "-k", "record_imported")
+    else:
+        process, destination = qualify(pytest_addopts="-k record_imported")
+    assert process.returncode == 0, process.stdout + process.stderr
+    record = json.loads((destination / "qualification.json").read_text())
+    inputs = json.loads((destination / "qualification-input.json").read_text())
+    assert inputs["pytest_args"] == record["pytest_args"]
+    assert inputs["pytest_environment"] == record["pytest_environment"]
+    if selection_source == "arguments":
+        assert record["pytest_args"] == ["tests", "-q", "-k", "record_imported"]
+    else:
+        assert record["pytest_environment"]["PYTEST_ADDOPTS"] == "-k record_imported"
+    expected = hashlib.sha256(json.dumps(
+        ["tests/test_probe.py::test_record_imported_code"],
+        ensure_ascii=True, separators=(",", ":")).encode()).hexdigest()
+    assert record["pytest_collection"] == dict(
+        finished=True, selected_count=1, deselected_count=1, ordered_nodeids_sha256=expected)
 
 
 @pytest.mark.parametrize("contamination", ["editable", "extra-data", "source", "metadata", "ownership"])

@@ -45,6 +45,33 @@ source distribution to an outside-checkout directory, and run them against the
 installed package. Confirm import paths and runtime source hashes. Record
 dependency versions, platform, warnings, skipped capabilities and test results.
 
+For a current-dependency CPU check of the single wheel/source pair just built:
+
+```sh
+python -m venv /tmp/pyeph-wheel-check-env
+/tmp/pyeph-wheel-check-env/bin/python -m pip install pytest /tmp/pyeph-distribution/*.whl
+JAX_PLATFORMS=cpu /tmp/pyeph-wheel-check-env/bin/python \
+  /tmp/pyeph-source-release/tools/qualify_distribution.py \
+  --sdist /tmp/pyeph-distribution/*.tar.gz \
+  --wheel /tmp/pyeph-distribution/*.whl \
+  --destination /tmp/pyeph-installed-check
+```
+
+Use new environment and destination paths; the distribution directory must
+contain exactly the intended wheel/source pair. The harness copies inventoried
+support files without `src`, checks installed-wheel ownership and hashes, and
+writes `qualification.json` and `pytest.log` in the destination. Reports retain
+pytest arguments, relevant pytest environment settings, and the count and hash
+of ordered selected test IDs. Selection describes collection, not completed or
+passed tests; assess it together with the exit code and log. The default log
+also includes the twenty slowest test phases.
+
+For a focused check, put `--pytest-args -q -k EXPRESSION` last. The harness always
+selects the `tests` root before these arguments; added positional paths do not
+replace that root. Focused and collection-only runs are not full-suite evidence.
+This CPU run does not qualify optional providers or another dependency/device
+stack.
+
 Use an explicit remote refspec after the audit. Do not push unrelated branches,
 tags, caches, run outputs or local audit archives. A new release must not alter
 the evidence attached to an earlier one.

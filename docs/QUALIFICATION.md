@@ -82,9 +82,19 @@ Its wheel SHA256 is
 `deafbbc8944faf4e865bd06f93aaab54793ed8fa6a27ac4a88a51f186cb5a6bf`
 and source-archive SHA256 is
 `f9e644a41be223431025fb8b97c9f921df8a8964ef1753066aa45511ed3a8513`.
-Linux CI and accelerator qualification of that corrected distribution remain
-in progress. Earlier suite results do not silently qualify changed runtime
-files or establish automatic stage guarding.
+The corresponding published commit,
+`a42198759cb91e4402d7c4f8881a43676bf08e39`, also passed its
+[Linux matrix](https://github.com/jiangtong1000/PyEPH/actions/runs/37239687825).
+All three installed-wheel jobs passed 1997 tests, with eight optional Torch
+skips and four archival expected failures. The minimum Python 3.11 stack
+retained 51 JAX casting warnings; current Python 3.12/3.13 reported none.
+The separate selected optional-Torch checks passed. Each retained CI archive
+matches that commit's 378-file inventory and the corrected 141-file runtime
+fingerprint
+`c43a67cf58cae3d86dd53c7fc50fd03d2796673927c1e3e14b826e5e6a3403fb`.
+The full accelerator suite has also passed as described below. These results
+do not establish automatic stage guarding or silently qualify later
+support-source changes.
 
 The [CI workflow](../.github/workflows/tests.yml) builds an explicit source
 export and tests its installed wheel on Linux with minimum/current stacks.
@@ -114,9 +124,14 @@ backend for host diagnostics, and float64 mode; installed runtime hashes stayed
 unchanged. It used the same `63e60def...` wheel and `b13a1a3c...` source archive
 identified above, with Python 3.12.10 and the current numerical stack.
 
-That full GPU result predates the dev2 host-geometry correction. The corrected
-dev2 distribution has its own pending accelerator suite and matched workflow
-checks; dev1 results do not silently qualify the changed runtime.
+That dev1 GPU result predates the host-geometry correction. The corrected dev2
+wheel `deafbbc8...` and source archive `f9e644a4...`, identified in full above,
+subsequently passed their own installed A100 suite: 1997 passed, eight optional
+Torch skips, four archival expected failures, and no warnings. The default A100
+GPU, CPU callback backend and float64 settings were verified, and all 141
+runtime hashes remained unchanged. The full pytest run took 3023.40 seconds;
+this is qualification duration, not a dynamics throughput benchmark.
+The corrected dev2 matched application-workflow checks are tracked separately.
 
 ## Acceptance gates and remaining scope
 
