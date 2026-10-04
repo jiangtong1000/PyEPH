@@ -15,6 +15,11 @@
 - Retain qualification test-selection arguments, relevant environment settings
   and ordered collection identity. Accept explicit pytest flag passthrough and
   report slow test phases to guide measured validation-workflow improvements.
+- Add an example of provider-owned local label shards for molecular and
+  periodic models, with complete force contractions, global structural splits,
+  count-weighted losses and strict candidate-bundle reconstruction.
+- Clarify the fixed-geometry linear operator contract and the separate energy
+  functional needed by electronic-state-dependent self-consistent generators.
 
 Host coverage checks remain separate from automatic guarding of internal
 dynamics stages. Earlier qualification does not silently apply to changed

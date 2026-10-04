@@ -42,10 +42,10 @@ another shared abstraction.
 
 | Area | Existing infrastructure | Next bounded improvement |
 | --- | --- | --- |
-| Release and portability | Explicit inventory, archive/history audit, installed-wheel harness and CPU CI definitions | Record actual minimum/current Linux and accelerator outcomes, with failures and hardware scope |
+| Release and portability | Explicit inventory, archive/history audit, installed-wheel harness, passing minimum/current Linux matrices and a complete A100 suite for the corrected runtime | Keep later support-source changes separately qualified; retain actual test selection, failures and hardware scope |
 | Public calculation path | `Problem`, `Simulation`, method-owned preparation and measurements; readable configuration descriptions | Keep the migration and first-calculation examples reproducible from the released tree |
 | Long trajectory campaigns | Persistent local claims, fenced retries and deterministic result merges | Add within-unit continuation and scheduler integration only with explicit checkpoint and filesystem contracts |
-| Learned models | A small dense fixed-basis label profile, family splits, model bundles, revalidation and sampled domain diagnostics | Add provider-owned local/block label readers and two qualified application training workflows, retaining charge-state, basis and complete-force evidence |
+| Learned models | Dense fixed-basis labels plus a provider-owned local-block shard example, global family splits, model bundles, revalidation and sampled domain diagnostics | Complete two application training workflows with independent carrier and nuclear force labels, retaining charge-state and basis evidence |
 | Atomic candidate graphs | Periodic construction, motion checks and explicit rebuild lineage | Implement the narrowly scoped [stage guard and recovery design](docs/NEIGHBOR_GUARD_DESIGN.md) |
 | Smooth sensitivities | Pure CPA/Ehrenfest RK4 rollouts, shared host span validation, generated-model calibration and full-gradient window benchmarks with independent derivatives | Extend windowed losses and force/parameter derivative qualification to the application providers; measure actual memory and long-time conditioning |
 

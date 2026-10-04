@@ -76,6 +76,7 @@ include examples/campaign.py
 include examples/differentiable_dynamics.py
 include examples/holstein_peierls.py
 include examples/linear_epc.py
+include examples/local_label_shards.py
 include examples/local_learned_coefficients.py
 include examples/mash2_tully.py
 include examples/mashrm_epc.py
@@ -309,6 +310,7 @@ include tests/test_learning_domain.py
 include tests/test_learning_lifecycle.py
 include tests/test_local_derivatives.py
 include tests/test_local_invariants.py
+include tests/test_local_label_shards.py
 include tests/test_local_models.py
 include tests/test_mapping_preflight.py
 include tests/test_mapping_reference.py

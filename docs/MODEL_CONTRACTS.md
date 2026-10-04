@@ -6,6 +6,15 @@ periodic orbital blocks or a learned residual can provide the same operations.
 The model states what its electronic space, coordinates and energies mean;
 the dynamics method requests the operations it needs.
 
+At fixed geometry and parameters, the current `apply` contract is a linear
+Hermitian electronic operator. Its matrix elements may depend nonlinearly on
+geometry, including through a neural network. Electronic-state-dependent
+self-consistent generators require a different energy-functional contract:
+their expectation value need not equal the electronic energy whose derivative
+defines the force. That profile is not supplied by the current geometry model
+interface. Explicit carrier feedback through coupled nuclear coordinates
+already belongs to the supported profile below.
+
 ## Native coupled dynamics
 
 The current fixed orthonormal effective-basis profile uses

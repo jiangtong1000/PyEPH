@@ -5,9 +5,17 @@ Independent numerical checks, installed-package checks and material validation
 answer different questions. The results below identify the snapshot actually
 tested; they do not silently qualify later source changes.
 
+The corrected dev2 runtime has passed complete installed suites on macOS CPU,
+the minimum/current Linux matrix, and an A100 GPU. Each of these dev2 suites
+passed 1997 tests, with eight optional-backend skips and four documented
+archival expected failures. The minimum Linux stack retained 51 JAX warnings;
+the current-stack runs reported none. The exact artifacts and qualifications
+are identified below. Later example, test and reporting changes have their own
+source qualification; unchanged runtime payloads alone do not qualify them.
+
 ## Installed CPU evidence, 4 October 2026
 
-The following complete suites ran outside the checkout against one audited
+The following historical dev1 suites ran outside the checkout against one audited
 wheel and source archive. Runtime files, distribution ownership and metadata
 matched before execution, and runtime hashes remained unchanged afterward.
 
@@ -96,6 +104,16 @@ The full accelerator suite has also passed as described below. These results
 do not establish automatic stage guarding or silently qualify later
 support-source changes.
 
+The subsequent support-source commit
+`8529690e7be4e71c266a85bd1ce46b0855a10244` added the full-gradient window
+benchmark and lifecycle follow-ups. Its [Linux CI matrix](https://github.com/jiangtong1000/PyEPH/actions/runs/37242207177)
+passed 2003 tests in each installed-wheel job, with eight optional Torch skips
+and four archival expected failures. The minimum stack retained 53 warnings;
+current Python 3.12/3.13 reported none. The selected optional-Torch job passed.
+The downloaded archives match that commit's 380-file inventory and the same
+corrected runtime fingerprint. Later qualification-report and local-label
+example changes require their own source checks.
+
 The [CI workflow](../.github/workflows/tests.yml) builds an explicit source
 export and tests its installed wheel on Linux with minimum/current stacks.
 A workflow definition is not evidence of a successful run. Local run archives
@@ -131,7 +149,15 @@ Torch skips, four archival expected failures, and no warnings. The default A100
 GPU, CPU callback backend and float64 settings were verified, and all 141
 runtime hashes remained unchanged. The full pytest run took 3023.40 seconds;
 this is qualification duration, not a dynamics throughput benchmark.
-The corrected dev2 matched application-workflow checks are tracked separately.
+The same corrected dev2 artifacts also passed 12 matched CPU/A100 workflow
+pairs across molecular and periodic illustrative models with CPA and
+Ehrenfest. Independent references, timestep refinement and numerical checkpoint
+continuation passed. At batch size 64 the molecular cases were faster on CPU,
+whereas the periodic cases were faster on this A100 allocation. GPU repetition
+showed small floating-point variation without discrete-field changes. These
+bounded results establish neither general GPU speedup nor material accuracy;
+use the [workflow benchmark](../benchmarks/platform_qualification.py) to measure
+the intended model and workload.
 
 ## Acceptance gates and remaining scope
 

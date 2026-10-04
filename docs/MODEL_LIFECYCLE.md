@@ -233,3 +233,51 @@ Ehrenfest run. Reproduce with:
 python -m pytest -q tests/test_learning_lifecycle.py tests/test_learning_domain.py \
   tests/test_materials_data.py tests/test_molecular_residual.py
 ```
+
+## Provider-owned local shards
+
+The [local-label shard example](../examples/local_label_shards.py) uses the
+existing oriented-fragment and periodic spinless s,p providers. Run it from the
+released source tree with a fresh output directory:
+
+```sh
+JAX_PLATFORMS=cpu python -m examples.local_label_shards --output outputs/local_shards_new
+python -m pytest -q tests/test_local_label_shards.py
+```
+
+It generates two fixed-basis numerical datasets, with the original examples'
+explicit nuclear references and carrier conventions. It does not fit a model,
+run an external teacher or establish material accuracy. The molecular and
+periodic NumPy helpers supply independent action/force references; stored local
+blocks come from the known native providers, so this is not independent
+validation of every individual periodic image block.
+
+Each provider-owned index binds ordered atoms/sites/orbitals, full edge-image
+keys, anchor/phase conventions, baseline and reference identities, and shard
+checksums. Numeric shards contain coordinates, physical onsite/hopping blocks,
+two saved electronic states, actions, two specified carrier-gradient
+contractions, reference energies and all-atom reference forces. They contain no
+global dense matrix derivative. The reader hashes and decodes the same payload
+bytes and rejects missing targets or incompatible shard identities.
+
+Global generated-family splits precede the shard reads. The three validation
+geometries use `q = q0 + scale * q0 @ S`, with scales `0.8, 1.0, 1.2` and
+`S = [[0, .005, 0], [0, 0, -.005], [.003, 0, 0]]`; this is a generated shear
+family, not a claim of real structural transfer. Native/oracle arrays and
+joined losses/gradients must be finite and shape-compatible before comparison.
+Unequal shards are
+aggregated by geometry counts; a small joined audit checks the resulting losses
+and parameter gradients. Native actions and contracted derivatives include the
+baseline, frame and reference response. The data-only candidate bundle binds
+the complete index and known reconstruction contract; the candidate remains
+unfitted. Source snapshots, arrays, numerical checks and failures are retained.
+
+This is an example-owned fixed-shape profile, not a universal sharded format or
+trainer. The global metadata index remains in host memory. Numeric batching is
+not a measured peak-memory or GPU-throughput claim. The saved real-symmetric
+counterexample demonstrates that two force contractions and exact Hamiltonian
+values at one geometry can miss other electronic derivative directions.
+Complete local derivative stencils or additional physically justified probes
+are needed when the target calculation requires more information. Numerical
+derivative consistency does not certify a physical teacher, charged-state
+energy meaning, orbital correspondence or transfer to withheld real materials.
