@@ -1,0 +1,81 @@
+# Copyright (c) 2026, the PyEPH contributors.
+# Migrated from https://github.com/jiangtong1000/PyEPH, revision
+# 6c4693acbb69a06a5bc8b0593abde2170ff38843, under BSD-3-Clause (see LICENSE).
+import jax.numpy as jnp
+
+from ._support import ryd_to_mev
+
+def zero_out_negative_freqs(freqs, eigvecs, phfreq_cutoff):
+    """
+    Zero out negative frequencies and eigenvectors.
+    """
+    for iq in range(eigvecs.shape[0]):
+        mask = freqs[iq] < phfreq_cutoff
+        eigvecs[iq, :, mask] = 0.0
+        freqs[iq, mask] = phfreq_cutoff
+    return eigvecs, freqs
+
+def compute_density(eph_real, delta_r_vectors):
+    """
+    We should normalize each mode separately.
+    Since we want each mode to be localized,
+    and each each mode g squared is conserved (normalized) by itself.
+    This avoids the unequal weight for different modes since g carries the frequency factor.
+    """
+    g2 = jnp.abs(eph_real) ** 2 # (nband, nband, nre, n_delta_r, nmodes)
+    p = jnp.sum(g2, axis=(0, 1, 2, 4))
+    p = p / jnp.sum(p)
+    r = jnp.linalg.norm(delta_r_vectors, axis=1)
+    return p, r
+
+def compute_density_each_band_and_mode(eph_real, delta_r_vectors):
+    g2 = jnp.abs(eph_real) ** 2  # (nband, nband, nre, n_delta_r, nmodes)
+    g2_norm = jnp.sum(g2, axis=3)  # (nband, nband, nre, nmodes)
+    mask = g2_norm > 1e-3 * jnp.max(g2_norm)
+    safe_g2_norm = jnp.where(mask, g2_norm, jnp.ones_like(g2_norm))
+    p = jnp.einsum('ijeru, ijeu->ijeur', g2, 1.0 / safe_g2_norm)
+    p = jnp.where(mask[..., None], p, 0.0)
+    p = jnp.sum(p, axis=(0, 1, 2, 3))
+    r = jnp.linalg.norm(delta_r_vectors, axis=1)
+    p = p / jnp.sum(p)
+    return p, r
+
+def localize_reorganization_energy(
+    eph_real,
+    freqs,
+    delta_re_ws,
+    delta_r_vectors,
+    weight=None,
+    mask_tol=1.0
+):
+    freq = jnp.mean(freqs, axis=0)
+    inv_omega = 1.0 / freq
+    g2 = jnp.abs(eph_real) ** 2 # (nband, nband, nre, n_delta_rp, nmodes)
+    g2 = g2.at[1,0].set(0.0)
+    reorg = jnp.einsum('ijeru,u->ijer', g2, inv_omega)
+
+    # apply mask
+    reorg_denom = jnp.sum(reorg, axis=-1)
+    mask = reorg_denom * ryd_to_mev > mask_tol
+
+    # # perform normalization for each hopping, not sure if we want this
+    inv_reorg_denom = jnp.where(mask, 1.0 / (reorg_denom + 1e-10), 0.0)
+    reorg = jnp.einsum('ijer, ije->ijer', reorg, inv_reorg_denom)
+
+    reorg = jnp.where(mask[..., None], reorg, 0.0)
+
+    if weight is not None:
+        return jnp.sum(reorg * weight)
+
+    reorg = reorg.sum(axis=(0,1)) # (nre, n_delta_rp)
+
+    rp_norm = jnp.linalg.norm(delta_r_vectors, axis=1)
+    rep_diff_norm = jnp.linalg.norm(delta_re_ws[:, None, :] - delta_r_vectors[None, :, :], axis=-1)
+    eq_mask = jnp.isclose(rep_diff_norm, 0.0, atol=1e-6, rtol=0.0)
+    weight = jnp.where(eq_mask, -1.0, rp_norm[None, :]+rep_diff_norm)
+    arg_rph_zero = jnp.argmin(rp_norm)
+    weight = weight.at[:, arg_rph_zero].set(-1.0)
+    # weight = weight ** 0.5
+
+    loss = jnp.sum(reorg * weight)
+    return loss

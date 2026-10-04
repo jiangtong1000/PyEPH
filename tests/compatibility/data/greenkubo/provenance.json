@@ -1,0 +1,135 @@
+{
+  "source_repository": "https://github.com/jiangtong1000/PyEPH",
+  "source_revision": "6c4693acbb69a06a5bc8b0593abde2170ff38843",
+  "python": "3.12.8 (v3.12.8:2dc476bcb91, Dec  3 2024, 14:43:19) [Clang 13.0.0 (clang-1300.0.29.30)]",
+  "dependencies": {
+    "numpy": "2.3.5",
+    "scipy": "1.18.1",
+    "h5py": "3.16.0",
+    "numba": "0.68.0",
+    "llvmlite": "0.50.0"
+  },
+  "sources": {
+    "pyeph/greenkubo/simulation.py": "ca10fc5cd89ba077bcd05c9a46afb5a22245c2fed73ae5153a056c71164d6ebb",
+    "pyeph/greenkubo/phonon.py": "41a3d12b7c5a56b1c4885e7edd6fd807c7d18f09cfdae422b24713e0d6fe1f0d",
+    "pyeph/greenkubo/analysis.py": "999421c4a225a36910963c209395d502f6d89730f006d82ff1147f73ddd3df35",
+    "pyeph/greenkubo/vpt.py": "c6909ffacb01914ef79cf9a68ac881ae7dd6c5284681b99b034a01fa31609631",
+    "pyeph/greenkubo/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pyeph/greenkubo/typical_model_helper.py": "88c1e8dfd62d87deda4865a5082501d3d76c98608da4feac1a7e76a26fcbc817",
+    "pyeph/greenkubo/mp_qmesh.py": "d7fce89891f1cf1b59540ad6bb241489660a78af2b41c1c8cd8727c8ce72252e",
+    "pyeph/greenkubo/utils.py": "454d87ebddcd92845b6ebaffefe318b846fa651d91ca30ea7782edbe99c262d2",
+    "pyeph/greenkubo/lattice.py": "361b6e816ba2fe778815531a00f07db72f391d0b572fcdc932d08d51f19b427b",
+    "pyeph/greenkubo/hamiltonian_2.py": "07a97242d0580632f9235a70899bc64a0c72c07b03d6af1d4d782e9f08d5d164",
+    "pyeph/greenkubo/mpi_random.py": "5acbb718ef303f08072d1392bd8ca5e184af5be0ab3f8ee9669aaee0788fb414",
+    "pyeph/greenkubo/estimator.py": "0227c13793999910419614e873c7640f3957a718d129f2b19fefe21daf0d2ebb",
+    "pyeph/greenkubo/vpt_opt.py": "c6909ffacb01914ef79cf9a68ac881ae7dd6c5284681b99b034a01fa31609631",
+    "pyeph/greenkubo/propagator.py": "646764d21f32693eca5ff3e4539862b8e92dcc0a0a284ef70c4daa3f21674f1e",
+    "pyeph/greenkubo/hamiltonian.py": "142a6041ccec5b6b2f2216c526ad8c3a9823f8d755f9f2263dc441dbf63bd889",
+    "pyeph/utils/grid.py": "16b6bc1abd44b626a5df4c0d653459bcb271463e10239186c076d1dd23856d30",
+    "pyeph/utils/cifio.py": "b37cade288a7928330b88fcdfb779d2c7bda836eed25ea0f8e7780ae2951610e",
+    "pyeph/utils/fake_mpi.py": "c408272e6758ab2e7a9a19c4d6d62c900011b5e242b5c8e3c2f6e5218607f9de",
+    "pyeph/utils/constants.py": "8096b57c7af41e9524e958d2744bbabd7d1966b72e11852d7cec3fa566a224ff",
+    "pyeph/utils/logger.py": "967f40cbe74cb80d3572db793c22faa62e5e6b2e4b4eb9a9125b2f3c4f7fe604",
+    "pyeph/utils/analyze_qcpbc_opt.py": "2e5d5b87ff55c662c3709d7ca7de5edd612ba0066bf6318fed31aa88bc0f0801"
+  },
+  "historical_expected": {
+    "expected_1D_CPA.h5": "d3d2c9107bffc2b3669dfea38fb81b78a8c1926a3764c27f467b8348f6994e22",
+    "expected_2D_CPA_bondPeierls_zzTrue.h5": "01a71e82f636047259a8262c9805527d6f8f385d88923bb362ce58af0142e7e2",
+    "expected_2D_CPA_bondPeierls_zzFalse.h5": "00f0358356a90732412adaa673c296a95c886966185d39a882f8952c279a05e3",
+    "expected_2D_CPA_opticalPeierls_zzTrue.h5": "54e2a104854bd75505b0764d81c96d015ac9237a803ff130f24782f45c0d8700",
+    "expected_2D_CPA_opticalPeierls_zzFalse.h5": "245959c9f7098feb537a7edd80432deb3583a2532c60eb74ab64aec79d6e73e1",
+    "expected_2D_PT_CPA_bondPeierls_zzTrue.h5": "9d7441d4da40f50b04029771df268310e032c198cf305e2d461882a5ede2b9c4",
+    "expected_2D_PT_CPA_bondPeierls_zzFalse.h5": "d67485f5541acd87aef1c35e29e5f39475ffc7ab90c6209b8ade4ae252002db4",
+    "expected_2D_PT_CPA_opticalPeierls_zzTrue.h5": "fc7bd4e664b7a357965706a1b7fac806939e4e9539492c47c4f9075944144f6c",
+    "expected_2D_PT_CPA_opticalPeierls_zzFalse.h5": "8edeabb35d8692f7b4c302af4c5c612486cd79d738e8d10299325c7a33290356"
+  },
+  "comparison_to_historical": {
+    "1D_CPA": {
+      "current_y": {
+        "max_abs_error": 9.485749680535094e-16,
+        "allclose": true
+      }
+    },
+    "2D_CPA_bondPeierls_zzTrue": {
+      "current_x": {
+        "max_abs_error": 6.661338147750939e-16,
+        "allclose": true
+      },
+      "current_y": {
+        "max_abs_error": 8.333897564733124e-17,
+        "allclose": true
+      }
+    },
+    "2D_CPA_bondPeierls_zzFalse": {
+      "current_x": {
+        "max_abs_error": 3.3306690738754696e-16,
+        "allclose": true
+      },
+      "current_y": {
+        "max_abs_error": 5.551284527130373e-17,
+        "allclose": true
+      }
+    },
+    "2D_CPA_opticalPeierls_zzTrue": {
+      "current_x": {
+        "max_abs_error": 5.551142228113921e-16,
+        "allclose": true
+      },
+      "current_y": {
+        "max_abs_error": 8.326672684688674e-17,
+        "allclose": true
+      }
+    },
+    "2D_CPA_opticalPeierls_zzFalse": {
+      "current_x": {
+        "max_abs_error": 4.445768331151997e-16,
+        "allclose": true
+      },
+      "current_y": {
+        "max_abs_error": 8.32847949227958e-17,
+        "allclose": true
+      }
+    },
+    "2D_PT_CPA_bondPeierls_zzTrue": {
+      "current_x": {
+        "max_abs_error": 0.030590818435045065,
+        "allclose": false
+      },
+      "current_y": {
+        "max_abs_error": 0.01175559266415634,
+        "allclose": false
+      }
+    },
+    "2D_PT_CPA_bondPeierls_zzFalse": {
+      "current_x": {
+        "max_abs_error": 1.278482977010375,
+        "allclose": false
+      },
+      "current_y": {
+        "max_abs_error": 0.2621990827916227,
+        "allclose": false
+      }
+    },
+    "2D_PT_CPA_opticalPeierls_zzTrue": {
+      "current_x": {
+        "max_abs_error": 0.03710191539630505,
+        "allclose": false
+      },
+      "current_y": {
+        "max_abs_error": 0.009767327283537018,
+        "allclose": false
+      }
+    },
+    "2D_PT_CPA_opticalPeierls_zzFalse": {
+      "current_x": {
+        "max_abs_error": 1.234605024907237,
+        "allclose": false
+      },
+      "current_y": {
+        "max_abs_error": 0.20442906050037876,
+        "allclose": false
+      }
+    }
+  },
+  "reference_sha256": "283716c9cf6747796c4f4ca1614e65276fa0c46093165403878a727a9bb9ea78"
+}

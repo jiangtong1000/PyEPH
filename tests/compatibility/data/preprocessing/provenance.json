@@ -1,0 +1,41 @@
+{
+  "source_repository": "https://github.com/jiangtong1000/PyEPH",
+  "source_revision": "6c4693acbb69a06a5bc8b0593abde2170ff38843",
+  "source_directory": "pyeph/post_qe2pert/test",
+  "license": "BSD-3-Clause (repository LICENSE)",
+  "originals": {
+    "DNTT_epr.h5": {
+      "bytes": 4173800,
+      "sha256": "71551f6d092aafca4fa6f7ec332b4e9f609a813fa96a32fd7b06dad9ea6ca318"
+    },
+    "DNTT_band_energies.h5": {
+      "bytes": 10224,
+      "sha256": "b970d561e6429420a864e715b2f900969120e072571d1012ef06dedb8a644bd2"
+    },
+    "DNTT_phdisp.h5": {
+      "bytes": 885056,
+      "sha256": "2162f819da718361aa5d5607de3e5cdc440e717c2100aeef1f434c23b424dcff"
+    },
+    "DNTT_ephmat.h5": {
+      "bytes": 347648,
+      "sha256": "e7a38ed10b6bc0a1e7e8061bff6a3c07aa1ac4422f367d30cb6cd2fc97f644c5"
+    }
+  },
+  "derived": {
+    "references.h5": {
+      "path_indices": [
+        0,
+        37,
+        200,
+        510
+      ],
+      "epc_reference_q_indices": [
+        0
+      ],
+      "epc_reference_k_indices": [
+        0
+      ],
+      "sha256": "3526692c81dac95eaa48b6f3fa50bc53fa1ffa9736b647bfc0f5d4e2c6dce59b"
+    }
+  }
+}

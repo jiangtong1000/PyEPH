@@ -1,0 +1,50 @@
+# Releasing an explicit source inventory
+
+`release-files.txt` is the publication boundary. Add a new file only after
+reviewing its content, license and purpose. Local evidence, working outputs and
+external reference bundles are outside this boundary. Required notices and
+accurate dependency declarations remain part of any applicable release.
+
+```sh
+python tools/release.py audit --inventory release-files.txt
+python tools/release.py export --inventory release-files.txt --destination /tmp/pyeph-source-release
+```
+
+The destination must be new. Exports reject symlinks and unlisted files. The
+optional `--policy /path/to/local-policy.json` accepts a JSON object containing
+`restricted_patterns`, a list of regular expressions. Keep that policy and
+audit reports outside the exported directory. The scanner checks text and
+supported numerical/archival formats recursively and rejects unknown binaries.
+It complements source review and an explicit inventory; it does not determine
+ownership or establish that an implementation is scientifically original.
+
+Before a remote branch or tag is sent, stage only the inventory and run:
+
+```sh
+python tools/release.py audit --inventory release-files.txt --git --ref HEAD
+```
+
+The staged tree must exactly match both inventory and working files. History
+checks inspect every reachable commit tree, historical filenames, blob contents,
+commit messages and an annotated tag when supplied as the reference. A clean
+current tree is insufficient if restricted material existed in earlier commits.
+History audits reject shallow repositories; fetch complete history before
+running the reference audit. The CI release gate uses a full-depth checkout.
+
+## Distribution qualification
+
+Build in the fresh export, never by repackaging a working environment:
+
+```sh
+python -m build --outdir /tmp/pyeph-distribution /tmp/pyeph-source-release
+```
+
+Inspect the actual wheel and source tarball with the same publication policy.
+Install the wheel into a fresh environment, copy tests and fixtures from the
+source distribution to an outside-checkout directory, and run them against the
+installed package. Confirm import paths and runtime source hashes. Record
+dependency versions, platform, warnings, skipped capabilities and test results.
+
+Use an explicit remote refspec after the audit. Do not push unrelated branches,
+tags, caches, run outputs or local audit archives. A new release must not alter
+the evidence attached to an earlier one.

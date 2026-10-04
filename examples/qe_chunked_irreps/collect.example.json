@@ -1,0 +1,19 @@
+{
+  "q_index": "REPLACE_WITH_Q_INDEX",
+  "total_irreps": "REPLACE_WITH_TOTAL_IRREPS",
+  "output": "/new/path/qN-dynmat-bundle",
+  "pattern_sources": [
+    "/path/to/chunk1/PREFIX.phsave/patterns.N.xml",
+    "/path/to/chunk2/PREFIX.phsave/patterns.N.xml"
+  ],
+  "dynmat_sources": [
+    "/path/to/original/PREFIX.phsave",
+    "/path/to/chunk1/PREFIX.phsave",
+    "/path/to/chunk2/PREFIX.phsave"
+  ],
+  "provenance": {
+    "qe_version": "REPLACE_WITH_QE_VERSION",
+    "qe_executable_sha256": "REPLACE_WITH_SHA256",
+    "scf_xml_sha256": "REPLACE_WITH_SHA256"
+  }
+}

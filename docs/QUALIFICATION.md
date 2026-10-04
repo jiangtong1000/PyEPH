@@ -1,0 +1,99 @@
+# Qualification scope
+
+This is a development release with bounded scientific and platform scope.
+Independent numerical checks, installed-package checks and material validation
+answer different questions. The results below identify the snapshot actually
+tested; they do not silently qualify later source changes.
+
+## Installed CPU evidence, 4 October 2026
+
+The following complete suites ran outside the checkout against one audited
+wheel and source archive. Runtime files, distribution ownership and metadata
+matched before execution, and runtime hashes remained unchanged afterward.
+
+| Platform | Python / numerical stack | Passed | Skipped | Expected failures | Warnings |
+| --- | --- | ---: | ---: | ---: | ---: |
+| macOS 26.6.2 arm64 CPU | 3.12.8 / current, with optional Torch | 2047 | 0 | 4 | 0 |
+| macOS 26.6.2 arm64 CPU | 3.11.17 / minimum | 1963 | 8 | 4 | 345 |
+| macOS 26.6.2 arm64 CPU | 3.13.16 / current | 1963 | 8 | 4 | 0 |
+
+The current numerical stack is JAX/JAXlib 0.11.2, NumPy 2.5.3, SciPy 1.18.1,
+h5py 3.16.0 and pytest 9.1.1. The first row additionally includes Torch 2.14.1.
+The minimum stack is pinned in [requirements-minimum.txt](../requirements-minimum.txt).
+The eight skips are missing optional Torch imports; parametrization makes the
+test-count difference larger than eight. The four expected failures retain
+historical transport golden files that already disagree with the pinned
+original engine; the independent saved-sample engine comparisons pass. See
+[fixture provenance](../tests/compatibility/data/greenkubo/README.md).
+
+The minimum stack reports matrix-product warnings on this Apple
+Silicon/Accelerate combination and JAX complex-to-real casting warnings during
+real-parameter differentiation. Finite numerical reference checks pass. A
+NumPy-only finite-matrix reproducer isolates the former warning family from
+the dynamics implementation; the current NumPy stack does not reproduce it.
+Warnings are retained, not suppressed. See [installation scope](INSTALLATION.md).
+
+Python 3.13 used a fresh native interpreter and freshly resolved/downloaded
+dependencies. The other two runs used fresh package environments with existing
+numerical dependency installations; they are not fresh-resolution evidence.
+
+These rows refer to wheel SHA256
+`67f20811d88204630b43a5f669db54b98046c3e71baaa9a0db779bd6f94ba41d`
+and source-archive SHA256
+`b49b6fcc775a5d3567c9bca762655c3d7105b1596fe4d387ded453d1f4e291d8`.
+Subsequent candidate changes are a separately checked whitespace cleanup,
+portability corrections in tests/example diagnostics, documentation, and the
+generated-model calibration benchmark. The numerical runtime equations did
+not change in that delta. Exact-candidate Python 3.13 and Linux/accelerator
+qualification is in progress; those results are not included in this table.
+
+The [CI workflow](../.github/workflows/tests.yml) builds an explicit source
+export and tests its installed wheel on Linux with minimum/current stacks.
+A workflow definition is not evidence of a successful run. Local run archives
+are retained separately from the source release. To regenerate a source-bound
+report, follow [the distribution procedure](RELEASE.md); the harness writes
+the exact identities, dependency versions, exit code and full test log.
+
+## Accelerator status
+
+Small molecular and periodic CPA/Ehrenfest workflows have completed matched
+CPU/A100 numerical gates, including independently referenced trajectories,
+timestep refinement, batching, sampled output and checkpoint continuation.
+These runs cover illustrative effective Hamiltonians, not validated materials
+or general large-system speedup.
+
+The first full A100 suite failed. Its records exposed a CUDA-only launch that
+excluded the CPU backend needed by host diagnostics, platform-specific fixture
+startup, overly exact comparisons of recomputed floating-point values, and
+independent-oracle resolution. Corrections preserve exact stored state and
+discrete fields while comparing propagated floating values with declared
+numerical tolerances. The corrected full accelerator suite remains pending;
+do not interpret the smaller workflow checks as a passing full GPU suite.
+
+## Acceptance gates and remaining scope
+
+| Area | Required evidence |
+| --- | --- |
+| Core methods | Independent equations, conservation/convergence and estimator tests |
+| Providers | Complete derivative, unit, Hermiticity and basis-contract checks |
+| Campaigns | Real concurrent claims, crash recovery, identity and deterministic merges |
+| Neighbor graphs | Independent periodic enumeration, motion coverage and cutoff forces |
+| Learned models | Withheld-family errors, strict bundle identity and domain diagnostics |
+| Distribution | Explicit inventory, history/archive audit and outside-checkout wheel suite |
+| Platforms | Separate CPU, dependency-stack and accelerator qualification |
+
+The current methods have intentionally bounded physical scope. Native geometry
+dynamics uses fixed orthonormal effective electronic states and a declared
+reference-plus-carrier total energy. Real finite-state multistate mapping
+dynamics requires a complete isolated spectrum; complex/SOC hopping and
+degenerate-subspace dynamics remain research work. General material mobility
+requires qualified preparation, current operators, statistics and model labels.
+
+Candidate graphs are fixed during compiled propagation. Coverage diagnostics
+and rebuilding have explicit host-side contracts. A declared descriptor domain
+is a geometric diagnostic, not calibrated uncertainty. Torch callbacks and
+independent-worker execution have separate hardware restrictions.
+
+CPU correctness does not establish GPU throughput, multi-node scaling, quantum
+accuracy or transferability to a new material. Published evidence must retain
+those distinctions.
