@@ -8,6 +8,9 @@ from dataclasses import dataclass, field, replace
 from copy import copy
 import hashlib
 from itertools import product
+from fractions import Fraction
+from math import ceil, floor, isqrt
+from struct import pack, unpack
 import json
 
 import numpy as np
@@ -150,41 +153,137 @@ class NeighborCoverageError(ValueError):
                          f"(maximum center displacement {report.maximum_displacement:g})")
 
 
-def _edges(positions, radius, cell, max_image_checks):
-    """Enumerate all images inside radius, including beyond the nearest image."""
-    inverse = None if cell is None else np.linalg.inv(np.asarray(cell))
-    bounds = None if inverse is None else radius * np.hypot.reduce(inverse, axis=0)
-    edges, checked = [], 0
-    for a in range(len(positions)):
-        for b in range(a if cell is not None else a + 1, len(positions)):
-            displacement = positions[b] - positions[a]
-            if inverse is None:
-                images = ((0, 0, 0),)
-                count = 1
+def _fraction(value):
+    """Decode float64 bits without floating arithmetic, including subnormals."""
+    bits = unpack(">Q", pack(">d", value))[0]
+    exponent = (bits >> 52) & 0x7ff
+    mantissa = bits & ((1 << 52) - 1)
+    if exponent == 0x7ff:
+        raise ValueError("exact host geometry requires finite float64 inputs")
+    power = -1074 if exponent == 0 else exponent - 1075
+    if exponent:
+        mantissa += 1 << 52
+    if bits >> 63:
+        mantissa = -mantissa
+    return (Fraction(mantissa << power) if power >= 0
+            else Fraction(mantissa, 1 << -power))
+
+
+class _HostGeometry:
+    """Approximate display coordinates and cached exact float-input centers."""
+
+    def __init__(self, q, centers):
+        self.q, self.centers = q, centers
+        self.positions = _center_positions(q, centers)
+        self._atoms = [[] for _ in range(centers.nsites)]
+        for atom, site in enumerate(centers.atom_site):
+            self._atoms[site].append(atom)
+        self._exact = {}
+
+    def exact(self, site):
+        if site not in self._exact:
+            atoms = self._atoms[site]
+            if len(atoms) == 1 and self.centers.weights[atoms[0]] == 1.:
+                result = tuple(_fraction(x) for x in self.q[atoms[0]])
             else:
-                fractional = displacement @ inverse
-                lower, upper = -fractional - bounds, -fractional + bounds
-                if (not np.isfinite(lower).all() or not np.isfinite(upper).all()
-                        or np.any(np.abs(lower) >= 2**31 - 2)
-                        or np.any(np.abs(upper) >= 2**31 - 2)):
+                terms = []
+                for atom in atoms:
+                    weight = _fraction(self.centers.weights[atom])
+                    if weight:
+                        terms.append((weight, tuple(_fraction(x) for x in self.q[atom])))
+                result = tuple(sum((weight*position[axis] for weight, position in terms),
+                                   Fraction(0)) for axis in range(3))
+            self._exact[site] = result
+        return self._exact[site]
+
+
+def _integer_geometry(points, radius, cell=()):
+    """Scale dyadic float-input geometry once; distance comparisons use integers.
+
+    Exact weighted centers, cell entries and radius are dyadic rationals. Their
+    denominators divide the largest power of two, including subnormal inputs.
+    The periodic inverse is generally not dyadic and stays rational separately.
+    """
+    rows = (*points, *cell, (radius,))
+    denominator = max(value.denominator for row in rows for value in row)
+
+    def scale(rows):
+        return tuple(tuple(value.numerator * (denominator // value.denominator)
+                           for value in row) for row in rows)
+
+    scaled_radius = radius.numerator * (denominator // radius.denominator)
+    return scale(points), scaled_radius, scale(cell), denominator
+
+
+def _inverse_exact(cell):
+    """Exact 3x3 inverse for complete periodic image boxes, once per search."""
+    rows = [[_fraction(cell[i][j]) for j in range(3)]
+            + [Fraction(int(i == j)) for j in range(3)] for i in range(3)]
+    for column in range(3):
+        pivot = next((i for i in range(column, 3) if rows[i][column]), None)
+        if pivot is None:
+            raise ValueError("periodic cell is exactly singular")
+        rows[column], rows[pivot] = rows[pivot], rows[column]
+        factor = rows[column][column]
+        rows[column] = [x / factor for x in rows[column]]
+        for i in range(3):
+            if i != column:
+                factor = rows[i][column]
+                rows[i] = [x - factor*y for x, y in zip(rows[i], rows[column])]
+    return tuple(tuple(row[3:]) for row in rows)
+
+
+def _ceil_sqrt(value):
+    lower = isqrt(value.numerator // value.denominator)
+    return lower + (lower*lower*value.denominator != value.numerator)
+
+
+def _edges(geometry, cutoff, cell, max_image_checks, *, skin=0.):
+    """Complete exact float-input search, intentionally host-only and bounded."""
+    radius = _fraction(cutoff) + _fraction(skin)
+    inverse = None if cell is None else _inverse_exact(cell)
+    limits = None if inverse is None else tuple(_ceil_sqrt(
+        radius**2 * sum((inverse[k][j]**2 for k in range(3)), Fraction(0))) for j in range(3))
+    exact_cell = () if cell is None else tuple(tuple(_fraction(x) for x in row) for row in cell)
+    exact_positions = tuple(geometry.exact(site) for site in range(len(geometry.positions)))
+    positions, scaled_radius, scaled_cell, denominator = _integer_geometry(
+        exact_positions, radius, exact_cell)
+    radius_squared = scaled_radius**2
+    edges, checked = [], 0
+    for a in range(len(geometry.positions)):
+        for b in range(a if cell is not None else a + 1, len(geometry.positions)):
+
+            delta = tuple(y-x for x, y in zip(positions[a], positions[b]))
+            if inverse is None:
+                images, count = ((0, 0, 0),), 1
+            else:
+                fractional = tuple(sum(
+                    (Fraction(delta[k], denominator) * inverse[k][j] for k in range(3)),
+                    Fraction(0)) for j in range(3))
+                bounds = tuple((floor(-f)-limit, ceil(-f)+limit)
+                               for f, limit in zip(fractional, limits))
+                if any(lo < np.iinfo(np.int32).min or hi > np.iinfo(np.int32).max
+                       for lo, hi in bounds):
                     raise ValueError("candidate image bounds must fit in int32")
-                # One extra integer on each side protects bounding arithmetic;
-                # the Cartesian distance below makes the actual selection.
-                ranges = [range(int(np.floor(lo)) - 1, int(np.ceil(hi)) + 2)
-                          for lo, hi in zip(lower, upper)]
-                count = len(ranges[0]) * len(ranges[1]) * len(ranges[2])
-                images = product(*ranges)
+                count = 1
+                for lo, hi in bounds:
+                    count *= hi-lo+1
             checked += count
             if checked > max_image_checks:
                 raise ValueError(f"candidate search exceeds max_image_checks={max_image_checks}; "
                                  "increase the explicit host search budget")
+            if inverse is not None:
+                # product pools its input iterables eagerly. Check the full
+                # Python-integer allocation budget BEFORE constructing it.
+                images = product(*(range(lo, hi+1) for lo, hi in bounds))
             for image in images:
                 if a == b and image <= (0, 0, 0):
                     continue
-                vector = displacement if cell is None else displacement + np.asarray(image) @ cell
-                if not np.isfinite(vector).all():
-                    raise ValueError("candidate displacement exceeds floating-point range")
-                if np.hypot.reduce(vector) <= radius:
+                vector = delta
+                if scaled_cell:
+                    vector = tuple(delta[j] + sum(image[k]*scaled_cell[k][j] for k in range(3))
+                                   for j in range(3))
+                if sum(x*x for x in vector) <= radius_squared:
                     edges.append((a, b, *image))
     return tuple(edges)
 
@@ -193,6 +292,9 @@ def _edges(positions, radius, cell, max_image_checks):
 class NeighborCoverage:
     """Per-geometry coverage evidence; an expired skin is not an omitted edge.
 
+    ``maximum_displacement`` is an approximate display value; ``within_skin``
+    uses exact float-input host geometry. It need not equal a floating comparison
+    of that display value against skin/2 at a rounding boundary.
     ``missing_edges=None`` means no exhaustive search was requested. An empty
     tuple certifies coverage at this geometry only, even if the skin expired.
     """
@@ -216,10 +318,13 @@ class NeighborCoverage:
 class NeighborGraph:
     """Candidate snapshot for an existing :class:`LocalBlockModel`.
 
-    Edges include every center/image pair within ``cutoff + skin`` at the
+    Edges include every center/image pair within the exact sum of the float64
+    ``cutoff`` and ``skin`` inputs at the
     reference geometry. A displacement of at most ``skin/2`` for every center
     certifies that every pair within the physical cutoff remains represented.
-    The certificate assumes fixed cell, fixed center map and continuous,
+    The host certificate interprets float64 inputs as exact real geometry; it
+    does not certify device rounding or hidden dynamics stages. It assumes
+    fixed cell, fixed center map and continuous,
     consistently unwrapped coordinates. It is deliberately conservative.
 
     ``capacity`` caps the number of unique Hermitian edges; no edge is silently
@@ -263,8 +368,9 @@ class NeighborGraph:
         if (self.parent_identity is not None and
                 (not isinstance(self.parent_identity, str) or not self.parent_identity)):
             raise ValueError("parent_identity must be a nonempty string or None")
-        positions = _center_positions(q, self.centers)
-        edges = _edges(positions, empty.cutoff + skin, empty.cell, checks)
+        geometry = _HostGeometry(q, self.centers)
+        positions = geometry.positions
+        edges = _edges(geometry, empty.cutoff, empty.cell, checks, skin=skin)
         if capacity is not None and len(edges) > capacity:
             raise NeighborCapacityError(len(edges), capacity)
         for key, value in dict(reference_coordinates=tuple(map(tuple, q.tolist())),
@@ -280,19 +386,30 @@ class NeighborGraph:
 
         No minimum-image reduction is applied to displacement from the reference:
         wrapping a site without rewrapping the snapshot must invalidate its skin.
-        This checks a single geometry, not unsaved points along a trajectory.
+        Decisions use exact rational float-input geometry;
+        maximum_displacement is an approximate diagnostic. This
+        checks one float-input geometry, not device arithmetic or unsaved stages.
         """
         if not isinstance(exhaustive, (bool, np.bool_)):
             raise ValueError("exhaustive must be boolean")
-        positions = _center_positions(_coordinates(q, self.centers.natoms), self.centers)
-        displacement = np.hypot.reduce(positions - self.reference_centers, axis=1)
+        geometry = _HostGeometry(_coordinates(q, self.centers.natoms), self.centers)
+        reference = _HostGeometry(np.asarray(self.reference_coordinates), self.centers)
+        with np.errstate(over="ignore", invalid="ignore"):
+            displacement = np.hypot.reduce(geometry.positions - self.reference_centers, axis=1)
         maximum = float(np.max(displacement))
+        count = self.centers.nsites
+        points = tuple(reference.exact(site) for site in range(count)) + tuple(
+            geometry.exact(site) for site in range(count))
+        scaled, limit, _, _ = _integer_geometry(points, _fraction(self.skin) / 2)
+        limit_squared = limit**2
+        within = all(sum((y-x)**2 for x, y in zip(scaled[site], scaled[count+site]))
+                     <= limit_squared for site in range(count))
         missing = None
         if exhaustive:
-            required = _edges(positions, self.cutoff, self.cell, self.max_image_checks)
+            required = _edges(geometry, self.cutoff, self.cell, self.max_image_checks)
             existing = set(self.graph.edges)
             missing = tuple(edge for edge in required if edge not in existing)
-        return NeighborCoverage(maximum, maximum <= self.skin / 2, missing)
+        return NeighborCoverage(maximum, within, missing)
 
     def require_coverage(self, q, *, exhaustive=False):
         """Raise with diagnostics when an explicit rebuild is required."""
@@ -312,7 +429,9 @@ class NeighborGraph:
 
         With ``wrapped, images = wrap_atoms(q, centers, cell)``, use
         ``snapshot.rewrapped(-images)`` to check/evaluate ``wrapped``. The
-        coordinate convention changes but physical candidate displacements do not.
+        Image relabeling preserves the intended physical displacements. Rounded
+        translated coordinates must also retain complete host candidates; if
+        not, this operation rejects and requires an explicit rebuild/remap.
         """
         if self.cell is None:
             raise ValueError("rewrapping requires a periodic cell")
@@ -325,8 +444,8 @@ class NeighborGraph:
         _same_vectors(np.zeros_like(positions), positions - expected_centers, self.cell)
         _same_vectors(_fragment_vectors(q, self.centers),
                       _fragment_vectors(shifted, self.centers), self.cell)
-        # This is a coordinate change, not a new distance search. Preserve exact
-        # candidate membership/order even for a pair on the list boundary.
+        # Preserve candidate membership/order, then verify completeness for the
+        # translated float-input geometry without silently adding interactions.
         graph = self.graph.rewrapped(shifts)
         for old, new in zip(self.graph.edges, graph.edges):
             a, b = old[:2]
@@ -334,6 +453,13 @@ class NeighborGraph:
                       + np.asarray(old[2:]) @ self.cell)
             after = positions[b] - positions[a] + np.asarray(new[2:]) @ self.cell
             _same_vectors(before, after, self.cell)
+        # Rounded translations change the exact float-input reference geometry.
+        # Preserve edge order/membership only if it is still a complete list.
+        required = _edges(_HostGeometry(shifted, self.centers), self.cutoff, self.cell,
+                          self.max_image_checks, skin=self.skin)
+        if not set(required).issubset(graph.edges):
+            raise ValueError("rewrapping loses candidate coverage; explicitly rebuild and "
+                             "remap parameters at the translated coordinates")
         result = copy(self)
         for key, value in dict(reference_coordinates=tuple(map(tuple, shifted.tolist())),
                                reference_centers=tuple(map(tuple, positions.tolist())),

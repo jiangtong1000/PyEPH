@@ -271,3 +271,66 @@ def test_recomputed_force_allowance_does_not_weaken_parameter_or_field_checks():
                 np.array([np.nan, -.02])):
         with pytest.raises(AssertionError):
             assert_recomputed_equal(bad, original)
+
+
+@pytest.mark.parametrize("byte_ids", [False, True])
+def test_cli_report_normalizes_geometry_ids_without_changing_label_identity(tmp_path, monkeypatch, byte_ids):
+    """Run the actual report/export path; fitting itself is outside this regression."""
+    from pyeph.learning import bundle_identity, load_labels, save_bundle
+
+    models, params, q = fixture()
+    ids = (np.array([b"train-a", b"validation-b", b"test-c"]) if byte_ids else
+           np.array(["train-alpha", "validation-β", "test-gamma"]))
+    groups = np.array(["train", "validation", "test"], dtype="S" if byte_ids else "U")
+    arrays = dict(q=np.repeat(np.asarray(q)[None], 3, axis=0), h_hole=np.zeros((3, 2, 2)),
+                  electronic_gradient=np.zeros((3, 2, 2, 12, 3)),
+                  neutral_energy=np.zeros(3), neutral_force=np.zeros((3, 12, 3)),
+                  species=np.array([6, 6, 1, 1, 1, 1]*2), fragment=np.repeat([0, 1], 6),
+                  geometry_ids=ids, groups=groups)
+    payload = tmp_path/"labels.npz"
+    np.savez(payload, **arrays)
+    payload_before = payload.read_bytes()
+    metadata = dict(schema="pyeph.fixed_basis_labels.v1", basis_kind="fixed_effective_orthonormal",
+                    basis_id="test:ordered-ethylene", carrier="hole",
+                    units=dict(energy="hartree", length="bohr"),
+                    electronic_energy_definition="synthetic report fixture", phase_convention="fixed",
+                    neutral_reference="synthetic reference", label_scope="report serialization only",
+                    sources=["independent generated reporting fixture"], arrays_file=payload.name,
+                    arrays_sha256=hashlib.sha256(payload_before).hexdigest())
+    manifest = tmp_path/"labels.json"
+    manifest.write_text(json.dumps(metadata))
+    manifest_before = manifest.read_bytes()
+    loaded, checked_metadata = load_labels(manifest)
+    assert loaded["geometry_ids"].dtype == ids.dtype
+    assert loaded["geometry_ids"].tobytes() == ids.tobytes()
+    contract = example.provider_bundle_contract(models, params, checked_metadata)
+    existing = save_bundle(tmp_path/"existing-bundle", example.parameter_arrays(params),
+                           contract=contract, validation=dict(scope="report fixture only",
+                           checks=[dict(name="synthetic parameter fixture", passed=True)]))
+    old_bundle = tmp_path/"existing-bundle/bundle.json"
+    old_bytes = old_bundle.read_bytes()
+
+    monkeypatch.setattr(example, "fit", lambda *args, **kwargs: (models, params, dict(hidden=8)))
+    predictions = dict(h=arrays["h_hole"], dh=arrays["electronic_gradient"],
+                       neutral_energy=arrays["neutral_energy"], neutral_force=arrays["neutral_force"])
+    monkeypatch.setattr(example, "evaluate", lambda *args: (predictions, {}))
+    output = tmp_path/"fit-report"
+    monkeypatch.setattr(sys, "argv", ["molecular_residual.py", str(manifest), "--output", str(output),
+                                      "--validation-groups", "validation", "--test-groups", "test"])
+    example.main()
+
+    report = json.loads((output/"report.json").read_text())
+    expected_ids = ids.astype(str)
+    assert report["splits"] == {name: [expected_ids[i]]
+                                for i, name in enumerate(("train", "validation", "test"))}
+    bundle = json.loads((output/"provider_bundle/bundle.json").read_text())
+    assert bundle["contract"]["dataset_sha256"] == bundle_identity(checked_metadata)
+    for name, values in report["splits"].items():
+        assert values == bundle["validation"]["label_report"]["splits"][name]["geometry_ids"]
+    assert payload.read_bytes() == payload_before
+    assert manifest.read_bytes() == manifest_before
+    reloaded, _ = load_labels(manifest)
+    assert reloaded["geometry_ids"].dtype == ids.dtype
+    assert reloaded["geometry_ids"].tobytes() == ids.tobytes()
+    assert old_bundle.read_bytes() == old_bytes
+    assert json.loads(old_bytes)["identity"] == existing["identity"]

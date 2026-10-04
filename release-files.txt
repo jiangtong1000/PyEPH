@@ -333,6 +333,7 @@ tests/test_molecular_residual.py
 tests/test_moving_frame_feedback.py
 tests/test_native_models.py
 tests/test_neighbor_graph.py
+tests/test_neighbor_roundoff.py
 tests/test_normal_mode_bath.py
 tests/test_numpy_parameters.py
 tests/test_observation_validation.py

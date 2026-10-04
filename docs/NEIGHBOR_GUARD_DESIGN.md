@@ -33,6 +33,12 @@ The first implementation should require all of the following:
   displaced or historical origin geometries needs its own coverage contract
   and is excluded initially.
 
+Measurements must also be pure and valid at the extra segment-initial/final
+evaluation points introduced by the workflow. Shape inference and conditional
+branches trace provider/measurement Python code even when a numerical branch
+will be rejected. The guard prevents rejected runtime evaluations; it does not
+prevent tracing of pure code.
+
 A plain `LocalBlockModel` has `Vref=0`; that convention must stay explicit. A
 useful first extension may accept exactly
 `SumModel((guarded_carrier, reference))`, with the carrier identified explicitly
@@ -187,6 +193,11 @@ An attempted segment is one bounded runner chunk. Its entry state is the last
 committed state. Run the attempt with `observer=None` and collect its bounded
 output internally; publish nothing until it succeeds. Initial output is also
 buffered, since the existing runner normally evaluates it before propagation.
+Set the runner chunk size to the attempted segment length, including the final
+remainder, so its failure rollback identifies that same committed entry. Before
+the first segment, validate the entire requested run span through the existing
+shared host validator. A later segment must not discover a predictable path
+domain, counter-overflow or clock-resolution failure after earlier publication.
 The workflow checks initial coverage before calling runner preflight, which
 can itself evaluate model coefficients.
 The starting snapshot must certify the supplied initial geometry. Reject an
@@ -263,6 +274,14 @@ claim bitwise continuation across a graph-order/kernel change. Require exact
 checkpoint storage/load integrity and physical equivalence within declared
 floating-point tolerances. Source and runtime changes remain separate migrations.
 
+The ordinary model manifest does not identify a separate guard. An anchor or
+skin change can leave its graph and model manifest identical. Therefore a
+workflow checkpoint envelope must additionally bind snapshot identity, guard
+arithmetic/margin policy, model/parameter identities, state checksum and absolute
+output-step policy. Validate this envelope before ordinary checkpoint preflight
+can evaluate the provider. Failed rebuild attempts belong in the attempt ledger;
+they must not become parents in the chain of committed generations.
+
 ## Proposed public workflow sketch
 
 The following is an interface sketch, **not runnable current API**. Introduce
@@ -294,6 +313,12 @@ and preserves state; the factory cannot advance nuclei, electronic state or
 random streams. The initial snapshot's capacity and every allowed enlargement
 must fit the declared edge budget. The first version does not accept an arbitrary
 live observer during an attempted segment.
+
+Validate the factory's unchanged physical configuration explicitly: basis,
+atom/site ordering, cutoff and `switch_on`, units/carrier convention, method,
+nuclear treatment/masses, preparation and measurement. Agreement at the rollback
+geometry is a sanity check alongside provider invariance evidence; it is not
+proof of equivalence at future geometries or for untested electronic states.
 
 Each yielded record contains the accepted final state, globally filtered output
 rows and generation/retry manifests. Yielding provides bounded numerical

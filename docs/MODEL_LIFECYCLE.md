@@ -10,6 +10,22 @@ atomic coordinates in bohr, and energies in Hartree. A label set may contain
 complex Hermitian matrices and their complete derivatives. Supporting this
 data type does not imply that every dynamics method supports complex states.
 
+This is a small dense data profile, not a universal teacher-output requirement.
+When present, its full electronic derivative has shape
+`(samples, states, states, atoms, 3)`, and the loader reads the complete NPZ into
+memory. For 1,000 states and 1,000 atoms, one real float64 derivative tensor is
+24 GB before copies. Large local/block providers need their own sharded label
+formats and batch readers; those are not implemented by this loader. The
+runtime can already apply local Hamiltonian blocks and differentiate scalar
+energy contractions without constructing that global tensor.
+
+Such future readers should preserve the shared identity and family-split
+contracts while recording their own site/orbital order, local frames, periodic
+images and phase/unitary conventions. A teacher's selected force contractions
+must remain identified as contractions, rather than being presented as a full
+matrix derivative. Elementwise matrix losses require a consistent electronic
+representation across geometries; smooth eigenvalues alone do not supply it.
+
 ## Labels and whole-family validation
 
 ```python

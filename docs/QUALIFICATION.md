@@ -16,6 +16,7 @@ matched before execution, and runtime hashes remained unchanged afterward.
 | macOS 26.6.2 arm64 CPU | 3.12.8 / current, with optional Torch | 2047 | 0 | 4 | 0 |
 | macOS 26.6.2 arm64 CPU | 3.11.17 / minimum | 1963 | 8 | 4 | 345 |
 | macOS 26.6.2 arm64 CPU | 3.13.16 / current | 1963 | 8 | 4 | 0 |
+| Linux x86_64, glibc 2.34 CPU | 3.12.10 / current | 1963 | 8 | 4 | 0 |
 
 The current numerical stack is JAX/JAXlib 0.11.2, NumPy 2.5.3, SciPy 1.18.1,
 h5py 3.16.0 and pytest 9.1.1. The first row additionally includes Torch 2.14.1.
@@ -34,8 +35,10 @@ the dynamics implementation; the current NumPy stack does not reproduce it.
 Warnings are retained, not suppressed. See [installation scope](INSTALLATION.md).
 
 Python 3.13 used a fresh native interpreter and freshly resolved/downloaded
-dependencies. The other two runs used fresh package environments with existing
-numerical dependency installations; they are not fresh-resolution evidence.
+dependencies. The other two macOS runs used fresh package environments with
+existing numerical dependency installations; they are not fresh-resolution
+evidence. Linux used a fresh environment and dependency resolution with cached
+wheel payloads.
 
 These rows refer to wheel SHA256
 `67f20811d88204630b43a5f669db54b98046c3e71baaa9a0db779bd6f94ba41d`
@@ -44,8 +47,21 @@ and source-archive SHA256
 Subsequent candidate changes are a separately checked whitespace cleanup,
 portability corrections in tests/example diagnostics, documentation, and the
 generated-model calibration benchmark. The numerical runtime equations did
-not change in that delta. Exact-candidate Python 3.13 and Linux/accelerator
-qualification is in progress; those results are not included in this table.
+not change in that delta. That later dev1 candidate passed a complete native
+Python 3.13 CPU suite with 1972 passed, eight optional Torch skips, four archival
+expected failures and no warnings. It reused the earlier freshly resolved
+Python 3.13 dependencies. Its wheel SHA256 is
+`63e60def06881395ebb308bf7ddffff1277dbde1e6a61540818f50edd3683ac0`
+and source-archive SHA256 is
+`b13a1a3cac8707a30b6e04da57e42e4ef6e9f23c6f98ea928d925176d87e393a`.
+
+Those passing suites preceded a targeted geometry audit that found host
+neighbor-coverage errors at floating-point boundaries. The dev2 correction uses
+exact float-input geometry for candidate and skin decisions, checks completeness
+after rewrapping, and rejects excessive image searches before allocation. It
+also fixes serialization of valid byte-string geometry IDs in a fitting report.
+Corrected-distribution qualification is in progress. Earlier suite results do
+not silently qualify this changed runtime or establish automatic stage guarding.
 
 The [CI workflow](../.github/workflows/tests.yml) builds an explicit source
 export and tests its installed wheel on Linux with minimum/current stacks.

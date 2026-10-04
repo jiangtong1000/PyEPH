@@ -42,12 +42,17 @@ positive images. The zero-image self interaction belongs to the provider's
 onsite block. A periodic graph represents a Gamma-point simulation supercell;
 it does not insert Bloch phases.
 
-Search includes **all** images within `cutoff + skin`, including self images
+Search includes **all** images within the exact sum of the float64 `cutoff`
+and `skin` inputs, including self images
 and multiple images of the same site pair. It does not assume an orthogonal
 cell, a nearest image, or a cutoff smaller than half a cell length. Reciprocal
-cell bounds delimit a finite integer search, followed by a Cartesian distance
-test. `max_image_checks` bounds total candidate-image work and raises before an
-unbounded search. Construction is a host pair search, with cost proportional
+cell bounds use an exact rational 3×3 inverse and integer square-root bounds
+to delimit a complete finite image search. Cartesian squared distances are
+compared as exact integers after scaling the binary input geometry once to
+a common power-of-two denominator. No rounded norm decides inclusion.
+`max_image_checks` bounds total candidate-image work and raises before
+constructing image pools or enumerating an oversized search. Construction is
+a host pair search, with cost proportional
 to site-pair count times the number of tested images; no linear-scaling or
 accelerated neighbor-search performance is claimed.
 
@@ -78,7 +83,12 @@ np.testing.assert_allclose(restored, q)
 
 `rewrapped` changes the reference coordinates and graph images together,
 preserving candidate order and physical displacements. It returns a new
-generation with parent identity. Rewrapping only the coordinates invalidates
+generation with parent identity only after a complete host search confirms that
+the translated float64 reference geometry still has every required candidate.
+Translation rounding can move an omitted pair across the list boundary; that
+case rejects and requires an explicit rebuild and parameter remap. Verification
+does not insert edges or change their existing order. Rewrapping only the
+coordinates invalidates
 the old graph convention and can remove a physically required image from the
 represented set. Coordinate-dependent provider terms and reference potentials
 must separately respect the intended periodic convention; shifting graph
@@ -92,6 +102,21 @@ guarantees every current pair inside the physical cutoff is still present.
 The fixed cell, fixed center map and consistent winding convention are part
 of that statement. The check is conservative: uniform translation can exhaust
 the skin even though pair distances are unchanged.
+
+This is a **host geometric certificate**: coordinates, weights, cell, cutoff and
+skin are interpreted as exact real numbers after float64 input conversion.
+Weighted centers and squared-distance decisions use exact binary-rational or
+integer arithmetic, including subnormal and very large inputs. The approximate
+`maximum_displacement` display value need not reproduce the exact `within_skin`
+decision when manually compared to a floating `skin/2` near a boundary. Zero skin
+accepts an unchanged reference or exactly center-preserving motion.
+
+The certificate does not bound independent native CPU/GPU arithmetic, provider
+internal neighborhoods, or hidden dynamics stages. Native stage guarding needs
+its own numerical margin and provider contract; see
+[the proposed guard design](NEIGHBOR_GUARD_DESIGN.md). Exact host checks cost more
+than ordinary floating distance checks and remain an explicitly bounded host
+operation, outside compiled propagation. No fast neighbor-update claim follows.
 
 `check(q)` returns displacement and skin evidence. `covered=True` means the
 skin proves current coverage; `covered=None` means the certificate expired

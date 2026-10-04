@@ -469,7 +469,7 @@ def main():
                   jax_random_configuration={name: getattr(jax.config, name, None) for name in (
                       "jax_default_prng_impl", "jax_threefry_partitionable", "jax_random_seed_offset")},
                   training=training, errors=errors, seconds=time.perf_counter()-start,
-                  splits={k: arrays["geometry_ids"][v].tolist() for k, v in splits.items()},
+                  splits={k: arrays["geometry_ids"][v].astype(str).tolist() for k, v in splits.items()},
                   static_configuration=static_configuration(models), implementation_hashes=source_identity,
                   parameter_schema=schema,
                   parameters_sha256=hashlib.sha256((args.output/"parameters.npz").read_bytes()).hexdigest())

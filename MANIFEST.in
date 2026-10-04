@@ -332,6 +332,7 @@ include tests/test_molecular_residual.py
 include tests/test_moving_frame_feedback.py
 include tests/test_native_models.py
 include tests/test_neighbor_graph.py
+include tests/test_neighbor_roundoff.py
 include tests/test_normal_mode_bath.py
 include tests/test_numpy_parameters.py
 include tests/test_observation_validation.py

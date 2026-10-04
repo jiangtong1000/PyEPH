@@ -45,9 +45,9 @@ another shared abstraction.
 | Release and portability | Explicit inventory, archive/history audit, installed-wheel harness and CPU CI definitions | Record actual minimum/current Linux and accelerator outcomes, with failures and hardware scope |
 | Public calculation path | `Problem`, `Simulation`, method-owned preparation and measurements; readable configuration descriptions | Keep the migration and first-calculation examples reproducible from the released tree |
 | Long trajectory campaigns | Persistent local claims, fenced retries and deterministic result merges | Add within-unit continuation and scheduler integration only with explicit checkpoint and filesystem contracts |
-| Learned models | Fixed-basis labels, family splits, model bundles, revalidation and sampled domain diagnostics | Add qualified teacher/training workflows with charge-state, electronic-branch and complete-force evidence |
+| Learned models | A small dense fixed-basis label profile, family splits, model bundles, revalidation and sampled domain diagnostics | Add provider-owned local/block label readers and two qualified application training workflows, retaining charge-state, basis and complete-force evidence |
 | Atomic candidate graphs | Periodic construction, motion checks and explicit rebuild lineage | Implement the narrowly scoped [stage guard and recovery design](docs/NEIGHBOR_GUARD_DESIGN.md) |
-| Smooth sensitivities | Pure CPA/Ehrenfest RK4 rollouts and shared host span validation | Demonstrate fitting against independently generated dynamical observables with held-out initial conditions |
+| Smooth sensitivities | Pure CPA/Ehrenfest RK4 rollouts, shared host span validation and a small independently referenced calibration example | Qualify windowed observable losses, memory use and force/parameter derivatives for real learned providers |
 
 Performance qualification must follow each method's actual operations. Sparse
 or action-based CPA/Ehrenfest does not remove the complete-spectrum requirement
