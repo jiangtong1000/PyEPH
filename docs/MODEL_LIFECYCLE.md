@@ -55,6 +55,53 @@ shapes and required companion energies. It does not numerically verify those
 derivatives against the energy labels. Optional labels remain optional; they are not imputed.
 These checks do not establish the physical accuracy of the teacher.
 
+### Explicit dimensional ingestion
+
+`import_labels` converts this same dense profile from explicitly declared
+`eV`/`angstrom` or `hartree`/`bohr` inputs. It saves a new atomic-unit artifact;
+ordinary `load_labels` continues to load saved bytes without consulting the
+current conversion constants.
+
+```python
+from pyeph.learning import import_labels, load_labels
+
+import_labels(
+    "raw/labels.json", "converted_labels",
+    static_configuration={"cell": cell_in_source_units,
+                          "cutoff": cutoff_in_source_units},
+)
+arrays, metadata = load_labels("converted_labels/labels.json")
+```
+
+Static lengths are explicitly limited to `cell`, `cutoff` and `switch_on`.
+The importer also binds coordinate dimensions, electronic dimension and basis
+identity. If `q_atomic = L * q_source` and `E_atomic = E * E_source`, complete
+electronic derivatives and reference forces use the factor `E/L`, retaining
+their derivative/force sign conventions. No missing labels are generated.
+
+The ingestion record includes actual factor values and their binary64 hex
+representations, raw and converted array identities, raw and converted static
+configuration, source-manifest/payload hashes, implementation hashes and
+dependency versions. Raw inputs are retained. Saved factor values can be
+supplied explicitly through `conversion_factors={"energy_to_hartree": E,
+"length_to_bohr": L}` when reproducing an earlier conversion. Atomic-unit input
+requires identity factors. Changing ambient library constants does not silently
+re-convert an existing label artifact.
+
+Existing artifacts without an ingestion record remain supported. When a record
+is present, loading checks its identity against the actual converted arrays and
+static configuration. This detects changed inputs; it does not authenticate an
+untrusted author or establish that the declared physical conventions are true.
+Provider reconstruction must still bind the full metadata into its expected
+model contract.
+
+The periodic example's optional `build_cspbi3(..., with_provenance=True)` also
+records its actual energy, length, inverse-length and mass factors, returned
+arrays and static graph. Its local-label-shard contract validates and binds
+that record. This remains an illustrative parameterized model.
+
+### Structural splits and reports
+
 `grouped_split` assigns whole structural families or trajectory identities to
 train, validation and test sets. Select fit parameters only with training
 data, hyperparameters with validation data, and inspect test data only for the

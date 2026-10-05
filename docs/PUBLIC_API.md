@@ -13,12 +13,14 @@ implementation details.
 | Nuclear feedback | `reference_gradient`, `contract_gradient`, `LowRankWeight` |
 | Dynamics | `validate(problem)`, `build_step(problem, integrator)` |
 | Calculation | `Problem`, `Simulation`, `Integrator`, `Execution` |
+| Checked coordinate domain | `core.geometry.CoordinateBox`, `Problem.geometry_guard` |
 | State | `TrajectoryState`, `make_state`, `stack_states`; method-owned preparation |
 | Measurement | physical model probes and method-compatible estimators |
 | Restart | `Simulation.save_checkpoint`, `Simulation.load_checkpoint` |
 | Ensembles | `run_ensemble`, `partition_ids`, `merge_ensembles` |
 | Durable work units | `execution.campaign.Campaign` |
 | Smooth sensitivities | `execution.differentiable.DifferentiableRollout` |
+| Label ingestion | `learning.import_labels`, `learning.load_labels` |
 | Nonlinear preparation | `workflows.canonical_metropolis.NativeCanonicalMetropolis` |
 
 `simulation.describe()` returns a JSON-ready summary without evaluating the

@@ -76,6 +76,8 @@ class Runner:
         if callable(validate_integrator):
             validate_integrator(integrator)
         self._checked = isinstance(integrator.electronic, LanczosOptions)
+        if problem.geometry_guard is not None and not self._checked:
+            raise ValueError("coordinate guards require scalar checked Lanczos propagation")
         if self._checked:
             if not callable(getattr(problem.method, "build_checked_step", None)):
                 raise ValueError("checked Lanczos propagation requires build_checked_step")
@@ -221,6 +223,10 @@ class Runner:
         diagnostics are undefined by construction, so the runner does not apply
         a blanket finite-value policy to arbitrary user measurements.
         """
+        if self.problem.geometry_guard is not None:
+            if any(not np.isfinite(np.asarray(value)).all() for value in jax.tree.leaves(values)):
+                raise SimulationError(f"{phase} observation contains nonfinite values",
+                                      last_valid_state=last_valid_state, failed_state=failed_state)
         validate = getattr(self.measurement, "validate_observations", None)
         if callable(validate):
             try:
@@ -241,7 +247,8 @@ class Runner:
                 "attempted_time": state.time})
             info = diagnostics["step_info"]
             reason = {1: "electronic action rejected", 2: "nonfinite physical stage",
-                      3: "accumulated action estimate exceeds macrostep budget"}.get(
+                      3: "accumulated action estimate exceeds macrostep budget",
+                      4: "coordinate outside declared CoordinateBox domain"}.get(
                           int(info.code), f"unknown method status {int(info.code)}")
             if int(info.code) == 1:
                 reason += ": " + "; ".join(STATUS.get(int(code), f"action status {int(code)}")

@@ -9,13 +9,16 @@ from pyeph.core.contracts import prepared_action, pure_state_weight
 from pyeph.core.problem import CoupledClassical
 from pyeph.dynamics.checked import (
     PHASE_EHRENFEST_FIRST,
+    PHASE_ENDPOINT,
     PHASE_EHRENFEST_SECOND,
     PHASE_FORCE_FIRST,
     PHASE_FORCE_SECOND,
     check_finite,
+    check_geometry,
     finish_checked_step,
     fixed_geometry_actions,
     initial_checked_info,
+    record_geometry,
     validate_checked_model,
 )
 from pyeph.integrators.electronic import propagate
@@ -60,6 +63,8 @@ class Ehrenfest:
             raise ValueError("Ehrenfest initial electronic states must be normalized")
 
     def build_step(self, problem, integrator):
+        if problem.geometry_guard is not None:
+            raise ValueError("coordinate guards require scalar checked Lanczos propagation")
         model, params = problem.model, problem.params
         mass = jnp.asarray(problem.nuclear_treatment.masses)
         dt = integrator.dt
@@ -92,6 +97,9 @@ class Ehrenfest:
         """
         self.validate(problem)
         validate_checked_model(problem, integrator)
+        guard = problem.geometry_guard
+        if guard is not None and batch:
+            raise ValueError("coordinate guards support scalar checked trajectories only")
         model, params = problem.model, problem.params
         mass = jnp.asarray(problem.nuclear_treatment.masses)
         dt, options = integrator.dt, integrator.electronic
@@ -101,16 +109,17 @@ class Ehrenfest:
         if batch:
             force = jax.vmap(force)
 
-        def half(q, electronic, info, phase):
+        def half(q, electronic, info, phase, time):
             return fixed_geometry_actions(model, params, q, electronic, info, dt / 2,
-                                          options, substeps, phase=phase, batch=batch)
+                                          options, substeps, phase=phase, batch=batch,
+                                          guard=guard, time=time)
 
         def step(state):
             expected_ndim = 2 if batch else 1
             if state.electronic.ndim != expected_ndim:
                 raise ValueError("checked Ehrenfest requires one pure electronic vector per trajectory")
-            info = initial_checked_info(state, options, batch=batch)
-            c, info = half(state.q, state.electronic, info, PHASE_EHRENFEST_FIRST)
+            info = initial_checked_info(state, options, batch=batch, guard=guard)
+            c, info = half(state.q, state.electronic, info, PHASE_EHRENFEST_FIRST, state.time)
 
             def nuclear_stage(candidate, diagnostic, *, phase, drift):
                 """Half kick, optionally followed by drift, with force/update gates."""
@@ -124,13 +133,16 @@ class Ehrenfest:
                         if drift:
                             q = current.q + dt * p / mass
                             updated = current._replace(q=q, p=p, electronic=c)
-                            return updated, check_finite(checked, p, q, phase=phase, batch=batch)
+                            at_drift = record_geometry(checked, q, state.time + dt)
+                            return updated, check_finite(at_drift, p, q, phase=phase, batch=batch)
                         return current._replace(p=p), check_finite(
                             checked, p, phase=phase, batch=batch)
 
                     return jax.lax.cond(checked.code == 0, update,
                                         lambda _: (current, checked), operand=None)
 
+                diagnostic = check_geometry(diagnostic, guard, candidate.q,
+                    state.time if drift else state.time + dt, phase=phase)
                 return jax.lax.cond(diagnostic.code == 0, evaluate, lambda x: x,
                                     (candidate, diagnostic))
 
@@ -139,12 +151,14 @@ class Ehrenfest:
 
             def second_half(carry):
                 candidate, diagnostic = carry
-                c_new, diagnostic = half(candidate.q, c, diagnostic, PHASE_EHRENFEST_SECOND)
+                c_new, diagnostic = half(candidate.q, c, diagnostic, PHASE_EHRENFEST_SECOND,
+                                         state.time + dt)
                 return candidate._replace(electronic=c_new, time=state.time + dt,
                                           step=state.step + 1), diagnostic
 
             candidate, info = jax.lax.cond(info.code == 0, second_half, lambda x: x,
                                           (candidate, info))
+            info = check_geometry(info, guard, candidate.q, candidate.time, phase=PHASE_ENDPOINT)
             return finish_checked_step(state, candidate, info, batch=batch)
 
         return step

@@ -83,6 +83,10 @@ def validate_state(problem, measurement, execution, state, *, checked):
     shape = state.q.shape[1:] if batch else state.q.shape
     if shape != problem.model.spec.system.q_shape or state.p.shape != state.q.shape:
         raise ValueError("state coordinates do not match the model")
+    if problem.geometry_guard is not None:
+        if batch:
+            raise ValueError("coordinate guards support scalar checked trajectories only")
+        problem.geometry_guard.require(state.q)
     if any(np.iscomplexobj(x) for x in (state.q, state.p, state.time)):
         raise ValueError("nuclear coordinates, momenta and time must be real")
     axis = 1 if batch else 0

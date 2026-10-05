@@ -1,5 +1,19 @@
 # Changes
 
+## 0.1.0.dev3 (unreleased)
+
+- Add an explicit coordinate-domain boundary to scalar checked CPA/Ehrenfest
+  stages, with retained rejection diagnostics and chunk rollback. Coordinate
+  membership does not certify neighbor coverage or model accuracy.
+- Add explicit fixed-basis label ingestion with saved conversion provenance,
+  and bind the periodic example's dimensional inputs to its model contract.
+
+This candidate has its own complete current/minimum macOS CPU checks and
+selected optional-Torch checks; see [qualification scope](docs/QUALIFICATION.md)
+for artifact identities, warnings and remaining platform coverage. The dev2
+accelerator results do not qualify its changed runtime. Automatic neighbor
+rebuilding remains unfinished.
+
 ## 0.1.0.dev2
 
 - Correct host neighbor coverage at floating-point boundaries using exact

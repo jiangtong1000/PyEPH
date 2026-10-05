@@ -200,6 +200,8 @@ def problem_manifest(problem, integrator, *, artifact_ids=None):
                "method": encoder.encode(problem.method, "method"),
                "integrator": encoder.encode(integrator, "integrator"),
                "measurement": encoder.encode(problem.measurement, "measurement")}
+    if problem.geometry_guard is not None:
+        payload["geometry_guard"] = encoder.encode(problem.geometry_guard, "geometry_guard")
     return _manifest("problem", payload, encoder)
 
 

@@ -1,10 +1,12 @@
 # Guarded candidate graphs during dynamics
 
-**Status: proposed design; no runtime guard or automatic rebuild workflow is
-implemented.** Existing [candidate snapshots](NEIGHBOR_GRAPHS.md) can check a
-supplied geometry and construct a replacement graph. They do not currently
-protect hidden stages of `Simulation.run`. This document specifies a bounded
-next implementation using the existing checked CPA/Ehrenfest boundaries.
+**Status: proposed neighbor-coverage and recovery design; automatic rebuilds
+are not implemented.** Existing [candidate snapshots](NEIGHBOR_GRAPHS.md) can
+check a supplied geometry and construct a replacement graph. The separate
+[coordinate-domain stage checks](COORDINATE_DOMAINS.md) reject internal CPA and
+Ehrenfest coordinates outside an explicit box, but do not certify candidate
+coverage. This document specifies the additional provider, arithmetic and
+recovery requirements for a guarded neighbor workflow.
 
 The objective is to stop **before** evaluating a local Hamiltonian, force or
 measurement at a geometry whose candidate coverage is no longer certified,
@@ -274,8 +276,10 @@ claim bitwise continuation across a graph-order/kernel change. Require exact
 checkpoint storage/load integrity and physical equivalence within declared
 floating-point tolerances. Source and runtime changes remain separate migrations.
 
-The ordinary model manifest does not identify a separate guard. An anchor or
-skin change can leave its graph and model manifest identical. Therefore a
+The ordinary model manifest binds `CoordinateBox` configuration but does not
+identify a `NeighborGraph` generation or its candidate/arithmetic/rebuild
+lineage. An anchor or skin change can leave its graph and model manifest
+identical. Therefore a
 workflow checkpoint envelope must additionally bind snapshot identity, guard
 arithmetic/margin policy, model/parameter identities, state checksum and absolute
 output-step policy. Validate this envelope before ordinary checkpoint preflight

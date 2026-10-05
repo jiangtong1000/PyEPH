@@ -20,6 +20,7 @@ PHASE_FORCE_FIRST = 3
 PHASE_FORCE_SECOND = 4
 PHASE_EHRENFEST_SECOND = 5
 PHASE_ENDPOINT = 6
+PHASE_MEASUREMENT = 7
 PHASE_NAMES = {
     PHASE_NONE: "initial state",
     PHASE_CPA: "CPA electronic action",
@@ -28,6 +29,7 @@ PHASE_NAMES = {
     PHASE_FORCE_SECOND: "Ehrenfest second force and kick",
     PHASE_EHRENFEST_SECOND: "Ehrenfest second electronic half",
     PHASE_ENDPOINT: "macrostep endpoint",
+    PHASE_MEASUREMENT: "accepted measurement",
 }
 
 
@@ -48,7 +50,49 @@ class CheckedStepInfo(NamedTuple):
     macrostep_budget: Any
 
 
-def empty_checked_info(state, *, batch=False):
+
+class GuardedStepInfo(NamedTuple):
+    """Checked diagnostics plus first attempted geometry/time for a domain fault.
+
+    Code 4 means coordinate-domain rejection, not missing-neighbor detection.
+    Unguarded kernels continue using the smaller CheckedStepInfo tree.
+    """
+    code: Any
+    phase: Any
+    substep: Any
+    failed_trajectories: Any
+    action: LanczosResult
+    accumulated_error_estimate: Any
+    macrostep_budget: Any
+    attempted_q: Any
+    attempted_time: Any
+
+
+
+def record_geometry(info, q, time):
+    """Retain the first attempted stage inputs, including a nonfinite fault."""
+    if not isinstance(info, GuardedStepInfo):
+        return info
+    active = info.code == 0
+    return info._replace(attempted_q=jnp.where(active, q, info.attempted_q),
+                         attempted_time=jnp.where(active, time, info.attempted_time))
+
+def check_geometry(info, guard, q, time, *, phase, substep=-1):
+    """Record and check the actual next scalar stage inputs before evaluation."""
+    if guard is None:
+        return info
+    active = info.code == 0
+    accepted = guard.contains(q)
+    failed = active & ~accepted
+    return info._replace(
+        attempted_q=jnp.where(active, q, info.attempted_q),
+        attempted_time=jnp.where(active, time, info.attempted_time),
+        code=jnp.where(failed, jnp.int32(4), info.code),
+        phase=jnp.where(failed, jnp.int32(phase), info.phase),
+        substep=jnp.where(failed, jnp.int32(substep), info.substep),
+        failed_trajectories=jnp.where(failed, True, info.failed_trajectories))
+
+def empty_checked_info(state, *, batch=False, guard=None):
     """Allocate shape-only diagnostics without invoking a model or measurement."""
     axis = 1 if batch else 0
     shape = state.electronic.shape[:axis] + state.electronic.shape[axis + 1:]
@@ -57,8 +101,13 @@ def empty_checked_info(state, *, batch=False):
     action = LanczosResult(state.electronic, zero, zero, zero, zero, zero, zero,
                            count, count)
     trajectories = (state.electronic.shape[0],) if batch else ()
-    return CheckedStepInfo(jnp.int32(0), jnp.int32(PHASE_NONE), jnp.int32(-1),
+    info = CheckedStepInfo(jnp.int32(0), jnp.int32(PHASE_NONE), jnp.int32(-1),
                            jnp.zeros(trajectories, bool), action, zero, zero)
+    if guard is not None:
+        if batch:
+            raise ValueError("coordinate guards support scalar checked trajectories only")
+        return GuardedStepInfo(*info, state.q, state.time)
+    return info
 
 
 def validate_checked_model(problem, integrator):
@@ -66,6 +115,13 @@ def validate_checked_model(problem, integrator):
         raise ValueError("a checked electronic step requires LanczosOptions")
     if not problem.model.spec.native_jax:
         raise ValueError("checked Lanczos propagation currently requires a native JAX model")
+    if problem.geometry_guard is not None:
+        from pyeph.core.geometry import CoordinateBox
+
+        if type(problem.geometry_guard) is not CoordinateBox:
+            raise TypeError("geometry_guard must be a CoordinateBox")
+        if problem.geometry_guard.shape != problem.model.spec.system.q_shape:
+            raise ValueError("coordinate guard and model coordinate shapes differ")
 
 
 def _trajectory_mask(mask, *, batch):
@@ -90,13 +146,13 @@ def check_finite(info, *values, phase, batch):
     )
 
 
-def initial_checked_info(state, options, *, batch):
+def initial_checked_info(state, options, *, batch, guard=None):
     if state.electronic.dtype != jnp.dtype(jnp.complex128):
         raise ValueError("checked propagation requires complex128 electronic state")
     if any(jnp.asarray(value).dtype != jnp.dtype(jnp.float64)
            for value in (state.q, state.p, state.time)):
         raise ValueError("checked propagation requires float64 q, p, and time")
-    info = empty_checked_info(state, batch=batch)
+    info = empty_checked_info(state, batch=batch, guard=guard)
     axis = 1 if batch else 0
     magnitude = jnp.abs(state.electronic)
     scale = jnp.max(magnitude, axis=axis, keepdims=True)
@@ -104,8 +160,9 @@ def initial_checked_info(state, options, *, batch):
     norm = jnp.squeeze(scale, axis=axis) * jnp.sqrt(jnp.sum(normalized**2, axis=axis))
     budget = options.atol + options.rtol * norm
     info = info._replace(macrostep_budget=budget)
-    return check_finite(info, state.q, state.p, state.electronic, state.time, budget,
+    info = check_finite(info, state.q, state.p, state.electronic, state.time, budget,
                         phase=PHASE_NONE, batch=batch)
+    return check_geometry(info, guard, state.q, state.time, phase=PHASE_NONE)
 
 
 def electronic_action(model, params, q, electronic, duration, options, budget, *, batch):
@@ -128,7 +185,7 @@ def record_action(info, action, *, phase, substep, batch):
 
 
 def fixed_geometry_actions(model, params, q, electronic, info, duration, options,
-                           substeps, *, phase, batch):
+                           substeps, *, phase, batch, guard=None, time=None):
     """Advance one frozen-geometry half, respecting the original macro budget."""
     action_duration = duration / substeps
     # This helper is the Ehrenfest half; both halves share one original budget.
@@ -137,11 +194,18 @@ def fixed_geometry_actions(model, params, q, electronic, info, duration, options
     def body(index, carry):
         def advance(carry):
             c, diagnostic = carry
-            action = electronic_action(model, params, q, c, action_duration, options,
-                                       allocation, batch=batch)
-            diagnostic = record_action(diagnostic, action, phase=phase,
-                                       substep=index, batch=batch)
-            return action.value, diagnostic
+            diagnostic = check_geometry(diagnostic, guard, q, time, phase=phase, substep=index)
+
+            def apply(carry):
+                c, diagnostic = carry
+                action = electronic_action(model, params, q, c, action_duration, options,
+                                           allocation, batch=batch)
+                diagnostic = record_action(diagnostic, action, phase=phase,
+                                           substep=index, batch=batch)
+                return action.value, diagnostic
+            if guard is None:
+                return apply((c, diagnostic))
+            return jax.lax.cond(diagnostic.code == 0, apply, lambda x: x, (c, diagnostic))
         return jax.lax.cond(carry[1].code == 0, advance, lambda x: x, carry)
 
     return jax.lax.fori_loop(0, substeps, body, (electronic, info))

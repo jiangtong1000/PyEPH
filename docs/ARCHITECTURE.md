@@ -41,6 +41,7 @@ src/pyeph/
 │   ├── state.py              explicit trajectory and recorded-path state
 │   ├── validation.py         optional host preflight at actual model coordinates
 │   ├── coordinates.py        canonical / Cartesian coordinate conversion
+│   ├── geometry.py           explicit coordinate domains for checked scalar stages
 │   └── units.py              declared reduced units and ingestion conversion
 ├── models/
 │   ├── base.py               optional autodiff implementation conveniences
@@ -112,6 +113,7 @@ src/pyeph/
 │   └── ensemble.py           batch initialization and partition statistics
 ├── learning/
 │   ├── labels.py             data conventions and structural holdout splits
+│   ├── ingestion.py          explicit dimensional conversion and input identities
 │   ├── reports.py            validation errors with units and split identity
 │   ├── bundles.py            parameter artifacts, identity and revalidation
 │   └── domain.py             sampled geometry diagnostics and failure records

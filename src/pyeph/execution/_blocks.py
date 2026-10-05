@@ -119,12 +119,13 @@ def build_block(problem, integrator, measurement, *, batch, nsteps, indices, set
 
 def build_checked_block(problem, integrator, measurement, *, batch, nsteps, indices):
     """Build scalar acceptance gates around explicitly batched method stages."""
-    from pyeph.dynamics.checked import empty_checked_info
+    from pyeph.dynamics.checked import (PHASE_MEASUREMENT, check_finite,
+                                        check_geometry, empty_checked_info)
 
     def block(params, state):
         runtime_problem = replace(problem, params=params)
         step = runtime_problem.method.build_checked_step(runtime_problem, integrator, batch=batch)
-        info = {"step_info": empty_checked_info(state, batch=batch),
+        info = {"step_info": empty_checked_info(state, batch=batch, guard=problem.geometry_guard),
                 "failed_macro_index": jnp.int32(-1)}
         if indices:
             def observe(s):
@@ -145,12 +146,39 @@ def build_checked_block(problem, integrator, measurement, *, batch, nsteps, indi
             def accept(_):
                 accepted = candidate._replace(time=state.time + (index + 1) * integrator.dt)
                 buffers = (cursor, times, values)
+                if problem.geometry_guard is None:
+                    if indices:
+                        buffers = jax.lax.cond(
+                            save_mask[index],
+                            lambda buffers: _save_observation(observe, accepted, buffers),
+                            lambda buffers: buffers, buffers)
+                    return (accepted, block_info, *buffers)
+
+                diagnostic = check_geometry(step_info, problem.geometry_guard, accepted.q,
+                                            accepted.time, phase=PHASE_MEASUREMENT)
                 if indices:
-                    buffers = jax.lax.cond(
-                        save_mask[index],
-                        lambda buffers: _save_observation(observe, accepted, buffers),
-                        lambda buffers: buffers, buffers)
-                return (accepted, block_info, *buffers)
+                    def measure(carry):
+                        checked, (cursor, times, values) = carry
+                        observation = observe(accepted)
+                        checked = check_finite(checked, *jax.tree.leaves(observation),
+                                               phase=PHASE_MEASUREMENT, batch=False)
+
+                        def save(buffers):
+                            cursor, times, values = buffers
+                            times = times.at[cursor].set(accepted.time)
+                            values = jax.tree.map(lambda x, y: x.at[cursor].set(y),
+                                                 values, observation)
+                            return cursor + 1, times, values
+                        buffers = jax.lax.cond(checked.code == 0, save, lambda x: x,
+                                               (cursor, times, values))
+                        return checked, buffers
+                    diagnostic, buffers = jax.lax.cond(
+                        (diagnostic.code == 0) & save_mask[index], measure, lambda x: x,
+                        (diagnostic, buffers))
+                failed = {"step_info": diagnostic, "failed_macro_index": index}
+                return jax.lax.cond(diagnostic.code == 0,
+                    lambda _: (accepted, block_info, *buffers),
+                    lambda _: (before, failed, cursor, times, values), operand=None)
 
             def reject(_):
                 failed = {"step_info": step_info, "failed_macro_index": index}

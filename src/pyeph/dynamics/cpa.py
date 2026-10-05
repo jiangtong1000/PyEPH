@@ -8,10 +8,12 @@ from pyeph.dynamics.checked import (
     PHASE_CPA,
     PHASE_ENDPOINT,
     check_finite,
+    check_geometry,
     electronic_action,
     finish_checked_step,
     initial_checked_info,
     record_action,
+    record_geometry,
     validate_checked_model,
 )
 from pyeph.integrators.electronic import propagate
@@ -26,6 +28,8 @@ class CPA:
             raise TypeError("a prescribed nuclear treatment must provide point(state, elapsed)")
 
     def build_step(self, problem, integrator):
+        if problem.geometry_guard is not None:
+            raise ValueError("coordinate guards require scalar checked Lanczos propagation")
         model, params = problem.model, problem.params
         treatment = problem.nuclear_treatment
 
@@ -53,6 +57,9 @@ class CPA:
         self.validate(problem)
         validate_checked_model(problem, integrator)
         model, params = problem.model, problem.params
+        guard = problem.geometry_guard
+        if guard is not None and batch:
+            raise ValueError("coordinate guards support scalar checked trajectories only")
         treatment = problem.nuclear_treatment
         options, dt = integrator.electronic, integrator.dt
         substeps = integrator.electronic_substeps
@@ -60,14 +67,18 @@ class CPA:
         point = jax.vmap(treatment.point, in_axes=(0, None)) if batch else treatment.point
 
         def step(state):
-            info = initial_checked_info(state, options, batch=batch)
+            info = initial_checked_info(state, options, batch=batch, guard=guard)
             allocation = info.macrostep_budget / substeps
 
             def body(index, carry):
                 def advance(carry):
                     electronic, diagnostic = carry
                     q, p = point(state, (index + 0.5) * duration)
+                    diagnostic = record_geometry(diagnostic, q,
+                        state.time + (index + 0.5) * duration)
                     diagnostic = check_finite(diagnostic, q, p, phase=PHASE_CPA, batch=batch)
+                    diagnostic = check_geometry(diagnostic, guard, q,
+                        state.time + (index + 0.5) * duration, phase=PHASE_CPA, substep=index)
 
                     def propagate(carry):
                         electronic, diagnostic = carry
@@ -85,7 +96,10 @@ class CPA:
 
             def endpoint(_):
                 q, p = point(state, dt)
-                diagnostic = check_finite(info, q, p, phase=PHASE_ENDPOINT, batch=batch)
+                diagnostic = record_geometry(info, q, state.time + dt)
+                diagnostic = check_finite(diagnostic, q, p, phase=PHASE_ENDPOINT, batch=batch)
+                diagnostic = check_geometry(diagnostic, guard, q, state.time + dt,
+                                            phase=PHASE_ENDPOINT)
                 return state._replace(q=q, p=p, electronic=electronic,
                                       time=state.time + dt, step=state.step + 1), diagnostic
 

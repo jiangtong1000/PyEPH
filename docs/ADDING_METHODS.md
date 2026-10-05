@@ -141,6 +141,11 @@ acceptance path. A compatible method supplies
 `build_checked_step(problem, integrator, *, batch=False)`, returning a pure
 `step(state) -> (state, CheckedStepInfo)` function. CPA and Ehrenfest implement
 this hook. Existing string integrators keep the ordinary `build_step` path.
+With a `CoordinateBox`, scalar CPA/Ehrenfest return the extended
+`GuardedStepInfo`, retaining the first attempted geometry and its evaluation
+time. Status code 4 denotes coordinate-domain rejection. This optional path
+requires the [coordinate-domain contract](COORDINATE_DOMAINS.md); it does not
+extend ordinary RK4 or batched execution.
 
 The checked function must handle its batch axis itself: vectorize individual
 action/force stages, reduce their statuses, and use scalar acceptance gates

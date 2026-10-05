@@ -25,6 +25,7 @@ from pyeph import CoupledClassical, Ehrenfest, Problem
 from pyeph.core.contracts import pure_state_weight
 from pyeph.io.checkpoint import array_fingerprint
 from pyeph.learning import bundle_identity, grouped_split, load_bundle, save_bundle
+from pyeph.learning.ingestion import validate_conversion
 from pyeph.models.composite import SumModel
 from examples import oriented_fragments, perovskite
 
@@ -77,6 +78,7 @@ class Profile:
     name: str
     problem: object
     origin: object
+    ingestion: object = None
 
     @property
     def carrier(self):
@@ -103,17 +105,27 @@ def profile(name):
         return Profile(name, problem, np.asarray(initial.q))
     if name != 'periodic':
         raise ValueError('choose molecular or periodic')
-    carrier, params, q, masses = perovskite.build_cspbi3(spinful=False)
+    carrier, params, q, masses, ingestion = perovskite.build_cspbi3(
+        spinful=False, with_provenance=True)
     reference = perovskite.HarmonicReference(replace(carrier.spec, name='illustrative_tethers'))
     model = SumModel((carrier, reference), additive_probes=carrier.spec.probes)
     neutral = {'equilibrium': q, 'spring': jnp.full(q.shape, .002)}
     return Profile(name, Problem(model, (params, neutral), CoupledClassical(masses), Ehrenfest()),
-                   np.asarray(q))
+                   np.asarray(q), ingestion)
 
 
 def contract(item):
     carrier = item.carrier
-    return json_data(dict(profile=item.name, basis_id=carrier.spec.system.basis_id,
+    if item.ingestion is not None:
+        converted = {**{key: np.asarray(value) for key, value in item.problem.params[0].items()},
+                     "q": np.asarray(item.problem.params[1]["equilibrium"]),
+                     "masses": np.asarray(item.problem.nuclear_treatment.masses)}
+        configuration = dict(graph={**asdict(carrier.graph),
+                                    "cell": np.asarray(carrier.graph.cell).tolist()},
+                             centers=asdict(carrier.centers), basis_id=carrier.spec.system.basis_id,
+                             q_shape=list(item.origin.shape), nstates=carrier.nstates)
+        validate_conversion(item.ingestion, converted, configuration=configuration)
+    return json_data(dict(profile=item.name, ingestion=item.ingestion, basis_id=carrier.spec.system.basis_id,
         basis_kind='fixed_effective_orthonormal', units={'energy': 'hartree', 'length': 'bohr'},
         carrier='hole' if carrier.charge > 0 else 'electron', charge=carrier.charge,
         graph=asdict(carrier.graph), centers=asdict(carrier.centers),

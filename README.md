@@ -59,6 +59,7 @@ configuration requires constructing a new simulation.
 | Migrate an existing PyEPH CPA transport calculation | [Transport migration](docs/TRANSPORT_MIGRATION.md) |
 | Resume independent trajectory jobs | [Campaigns](docs/CAMPAIGNS.md) |
 | Build finite or periodic candidate graphs | [Neighbor coverage](docs/NEIGHBOR_GRAPHS.md) |
+| Reject internal checked stages outside a declared coordinate domain | [Coordinate domains](docs/COORDINATE_DOMAINS.md) |
 | Load labels, validate fits and preserve model identity | [Model lifecycle](docs/MODEL_LIFECYCLE.md) |
 | Save and restore a trajectory | [Restart](docs/RESTART.md) |
 | Differentiate smooth trajectory observables | [Sensitivity rollouts](docs/DIFFERENTIABLE_DYNAMICS.md) |

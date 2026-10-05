@@ -66,6 +66,11 @@ def describe_simulation(simulation):
                            "dense_eigendecomposition" if electronic == "exponential_midpoint"
                            else "operator_action"),
                        "electronic_substeps": simulation.integrator.electronic_substeps},
+        "geometry_guard": (None if problem.geometry_guard is None else {
+            "type": "CoordinateBox", "lower": list(problem.geometry_guard.lower),
+            "upper": list(problem.geometry_guard.upper), "shape": list(problem.geometry_guard.shape),
+            "scope": "declared coordinate domain only; no neighbor coverage or automatic recovery",
+            "execution": "scalar checked CPA/Ehrenfest; ElectronicPopulation only"}),
         "measurement": type(simulation.measurement).__name__,
         "execution": asdict(simulation.execution),
         "precision": {"jax_x64_enabled": bool(jax.config.x64_enabled)},

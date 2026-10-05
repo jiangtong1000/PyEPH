@@ -84,6 +84,13 @@ zero-based within a segment, with `-1` for an empty record or a non-action failu
 The phase codes are `0` initial, `1` CPA, `2` first Ehrenfest half, `3` first
 force/drift, `4` second force/kick, `5` second half and `6` endpoint.
 
+Scalar calculations with a `CoordinateBox` instead use `GuardedStepInfo`, which
+extends this record with `attempted_q` and `attempted_time`. Code `4` means
+coordinate-domain rejection; phase `7` identifies accepted-state measurement
+validation. The first failure is retained. Unguarded calculations keep the
+smaller record and their existing status meanings. This optional boundary does
+not certify neighbor coverage; see [coordinate domains](COORDINATE_DOMAINS.md).
+
 Use the numerical result's natural diagnostic shapes: scalar for a vector,
 `(K,)` for a column block, `(B,)` for batched vectors, `(B,K)` for batched blocks.
 The accumulated estimate and budget use the same shapes. `action.value` keeps

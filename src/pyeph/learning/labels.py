@@ -88,6 +88,16 @@ def validate_labels(arrays, metadata):
             raise ValueError("electronic derivative labels must already be Hermitian")
     if "neutral_force" in arrays and "neutral_energy" not in arrays:
         raise ValueError("neutral forces require the corresponding reference energies")
+    if "ingestion" in metadata:
+        from .ingestion import validate_conversion
+        if "static_configuration" not in metadata:
+            raise ValueError("conversion provenance requires static_configuration")
+        validate_conversion(metadata["ingestion"], arrays,
+                            configuration=metadata["static_configuration"])
+        config = metadata["static_configuration"]
+        if (config.get("q_shape") != list(q.shape[1:]) or config.get("nstates") != states
+                or config.get("basis_id") != metadata["basis_id"]):
+            raise ValueError("converted dimensions or basis disagree with label metadata")
     return {name: np.array(value, copy=True) for name, value in arrays.items()}
 
 
@@ -95,6 +105,12 @@ def load_labels(manifest_path):
     """Load a JSON manifest and its checksum-bound NPZ; never enable pickle."""
     path = Path(manifest_path)
     metadata = json.loads(path.read_text())
+    arrays, _ = _read_arrays(metadata, path)
+    return validate_labels(arrays, metadata), metadata
+
+
+def _read_arrays(metadata, path):
+    """Read and verify one payload snapshot for loading or explicit ingestion."""
     filename = metadata.get("arrays_file")
     if (not isinstance(filename, str) or not filename or Path(filename).name != filename
             or Path(filename).suffix != ".npz" or "\\" in filename):
@@ -109,7 +125,7 @@ def load_labels(manifest_path):
         if len(set(archive.files)) != len(archive.files):
             raise ValueError("label archive contains duplicate array names")
         arrays = {name: archive[name] for name in archive.files}
-    return validate_labels(arrays, metadata), metadata
+    return arrays, data
 
 
 def grouped_split(groups, *, validation_groups, test_groups):

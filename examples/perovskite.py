@@ -12,10 +12,11 @@ charged-state force accuracy, or complex/SOC MASH support is claimed.
 """
 
 import argparse
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
 from pathlib import Path
+from importlib import metadata as package_metadata
 
 import jax
 import jax.numpy as jnp
@@ -30,6 +31,7 @@ from pyeph.core.contracts import ProbeContext
 from pyeph.core.problem import CoupledClassical
 from pyeph.core.state import make_state
 from pyeph.core.units import ATOMIC_TIME_FS, BOHR_ANGSTROM, HARTREE_EV
+from pyeph.learning.ingestion import record_conversion
 from pyeph.models.base import AutoDiffModel
 from pyeph.models.composite import SumModel
 from pyeph.models.local import AtomCenterMap, LocalBlockGraph, LocalBlockModel
@@ -68,14 +70,23 @@ class HarmonicReference(AutoDiffModel):
         return jnp.zeros_like(vectors)
 
 
-def build_cspbi3(mesh=(1, 1, 1), *, spinful=True, decay_per_angstrom=.8):
+def build_cspbi3(mesh=(1, 1, 1), *, spinful=True, decay_per_angstrom=.8,
+                  with_provenance=False):
     """Construct source sp3 blocks; all returned numerical values are atomic units.
 
     The graph contains exactly the six source-model nearest Pb--I bonds per
     Pb, retaining distinct cell images in small cells. Cs coordinates are
     retained with zero electronic-centre weight. Atomic coordinates are
     coherently unwrapped. This fixed connectivity is not a bond-reaction model.
+    ``with_provenance=True`` adds a fifth result recording the actual conversion
+    factors, numerical arrays and static graph; the default four results remain.
     """
+    if type(with_provenance) is not bool:
+        raise TypeError("with_provenance must be a bool")
+    # Snapshot the actual conversion values before building numerical inputs.
+    bohr_angstrom, hartree_ev = BOHR_ANGSTROM, HARTREE_EV
+    mass_factor = (physical_constants["atomic mass constant"][0]
+                   / physical_constants["electron mass"][0])
     mesh = tuple(integer_scalar(v, "mesh extent") for v in mesh)
     if len(mesh) != 3 or min(mesh) < 1:
         raise ValueError("mesh must contain three positive integers")
@@ -83,7 +94,7 @@ def build_cspbi3(mesh=(1, 1, 1), *, spinful=True, decay_per_angstrom=.8):
     if not np.isfinite(decay_per_angstrom) or decay_per_angstrom < 0:
         raise ValueError("decay_per_angstrom must be finite and nonnegative")
     provider = SlaterKosterSPCoefficients(spinful=spinful)
-    a = SOURCE_PARAMETERS["lattice"]/BOHR_ANGSTROM
+    a = SOURCE_PARAMETERS["lattice"]/bohr_angstrom
     cell = np.diag(np.asarray(mesh)*a)
     basis = np.array([[0., 0., 0.], [.5, 0., 0.], [0., .5, 0.],
                       [0., 0., .5], [.5, .5, .5]])
@@ -116,17 +127,39 @@ def build_cspbi3(mesh=(1, 1, 1), *, spinful=True, decay_per_angstrom=.8):
         sp, ps = ((src["s_c_p_a"], src["s_a_p_c"]) if i % 4 == 0 else
                   (src["s_a_p_c"], src["s_c_p_a"]))
         hops.append([src["ss"], sp, ps, src["pp_sigma"], src["pp_pi"]])
-    params = dict(onsite=jnp.asarray(onsite/HARTREE_EV), hopping=jnp.asarray(hops)/HARTREE_EV,
-                  decay=jnp.full((len(hops), 5), decay_per_angstrom*BOHR_ANGSTROM),
+    params = dict(onsite=jnp.asarray(onsite/hartree_ev), hopping=jnp.asarray(hops)/hartree_ev,
+                  decay=jnp.full((len(hops), 5), decay_per_angstrom*bohr_angstrom),
                   reference_distance=jnp.full((len(hops),), a/2))
     if provider.spinful:
         params["soc"] = jnp.asarray([src["soc_c"] if i % 4 == 0 else src["soc_a"]
-                                      for i in range(graph.nsites)])/HARTREE_EV
-    amu = physical_constants["atomic mass constant"][0]/physical_constants["electron mass"][0]
+                                      for i in range(graph.nsites)])/hartree_ev
+    amu = mass_factor
     masses = jnp.asarray(np.tile([207.2, 126.90447, 126.90447, 126.90447, 132.90545196],
                                  len(cells)))[:, None]*amu
     model.validate_at(params, q)
-    return model, params, jnp.asarray(q), masses
+    result = (model, params, jnp.asarray(q), masses)
+    if not with_provenance:
+        return result
+    converted = {**{key: np.asarray(value) for key, value in params.items()},
+                 "q": np.asarray(result[2]), "masses": np.asarray(result[3])}
+    configuration = dict(graph={**asdict(graph), "cell": np.asarray(graph.cell).tolist()},
+                         centers=asdict(centers), basis_id=model.spec.system.basis_id,
+                         q_shape=list(q.shape), nstates=model.nstates)
+    raw = {key: np.asarray(value) for key, value in SOURCE_PARAMETERS.items()}
+    raw.update(decay_per_angstrom=np.asarray(decay_per_angstrom),
+               mass_amu=np.asarray([207.2, 126.90447, 126.90447, 126.90447, 132.90545196]))
+    evidence = record_conversion(raw, converted,
+        raw_units=dict(energy="eV", length="angstrom", decay="1/angstrom", mass="amu"),
+        factors=dict(energy_to_hartree=1/hartree_ev, length_to_bohr=1/bohr_angstrom,
+                     decay_to_inverse_bohr=bohr_angstrom, mass_to_electron_mass=mass_factor),
+        raw_configuration=dict(mesh=list(mesh), spinful=provider.spinful,
+                               cell_angstrom=(np.diag(mesh)*SOURCE_PARAMETERS["lattice"]).tolist()),
+        converted_configuration=configuration,
+        source_identity=dict(reference="doi:10.1016/j.commatsci.2021.110535 Table I sp3",
+                             extension="illustrative exponential radial dependence"),
+        importer_identity={"perovskite.py": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()},
+        dependency_versions={name: package_metadata.version(name) for name in ("numpy", "scipy", "jax")})
+    return (*result, evidence)
 
 
 def measure(problem, state):

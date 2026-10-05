@@ -46,7 +46,7 @@ another shared abstraction.
 | Public calculation path | `Problem`, `Simulation`, method-owned preparation and measurements; readable configuration descriptions | Keep the migration and first-calculation examples reproducible from the released tree |
 | Long trajectory campaigns | Persistent local claims, fenced retries and deterministic result merges | Add within-unit continuation and scheduler integration only with explicit checkpoint and filesystem contracts |
 | Learned models | Dense fixed-basis labels plus a provider-owned local-block shard example, global family splits, model bundles, revalidation and sampled domain diagnostics | Complete two application training workflows with independent carrier and nuclear force labels, retaining charge-state and basis evidence |
-| Atomic candidate graphs | Periodic construction, motion checks and explicit rebuild lineage | Implement the narrowly scoped [stage guard and recovery design](docs/NEIGHBOR_GUARD_DESIGN.md) |
+| Atomic candidate graphs | Periodic construction, motion checks and explicit rebuild lineage; separate [coordinate-domain stage checks](docs/COORDINATE_DOMAINS.md) | Implement the additional coverage certificate, provider eligibility and recovery in the [neighbor workflow design](docs/NEIGHBOR_GUARD_DESIGN.md) |
 | Smooth sensitivities | Pure CPA/Ehrenfest RK4 rollouts, shared host span validation, generated-model calibration and full-gradient window benchmarks with independent derivatives | Extend windowed losses and force/parameter derivative qualification to the application providers; measure actual memory and long-time conditioning |
 
 Performance qualification must follow each method's actual operations. Sparse

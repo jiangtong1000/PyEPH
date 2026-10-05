@@ -1,6 +1,39 @@
 # Qualification scope
 
 This is a development release with bounded scientific and platform scope.
+
+The `0.1.0.dev3` candidate adds coordinate-domain stage checks and conversion
+provenance. Its own installed macOS CPU qualification is summarized here:
+
+| Dependency profile | Selection | Result |
+| --- | --- | --- |
+| Current, Python 3.13 / JAX 0.11.2 | Complete suite | 2078 passed, 8 skipped, 4 expected failures; no warnings |
+| Minimum, Python 3.11 / JAX 0.6.2 | Complete suite | 2078 passed, 8 skipped, 4 expected failures; 351 warnings retained |
+| Optional Torch, Python 3.12 | Selected adapter and shared-integration checks | 120 passed; no warnings |
+
+The eight complete-suite skips require optional Torch. The four expected
+failures preserve documented differences between archival golden data and its
+pinned original engine. The minimum stack emits JAX casting and NumPy
+matrix-product warnings. A bounded paired investigation reproduced twelve
+perovskite matrix-product warnings on dev2 and dev3 with finite, byte-identical
+captured operands and completed results. It does not establish the backend
+cause or explain every warning in the full suite.
+
+These runs used fresh package environments with existing numerical dependencies,
+not fresh dependency resolutions. They tested the wheel SHA256
+`90573641bd6bb9301038e48a18f32f3708326ce6fce7db573509c246ce20965c`
+and source-archive SHA256
+`a1e1a6925c24b36fe4048a8a9970b5e4040e0c543f191ea134f0d90ef2625cb7`.
+All 143 runtime files remained unchanged. The source archive contains 389
+explicitly inventoried files. The guard/replay and molecular/periodic local-label
+examples also passed against that installed wheel on both CPU dependency stacks.
+The local-label candidates are illustrative and unfitted.
+
+Later qualification-report edits are separate from that tested source archive;
+runtime, tests and executable support sources remain unchanged. These results
+do not qualify dev3 on Linux or accelerators. The historical dev2 platform
+results below apply to their own artifacts.
+
 Independent numerical checks, installed-package checks and material validation
 answer different questions. The results below identify the snapshot actually
 tested; they do not silently qualify later source changes.

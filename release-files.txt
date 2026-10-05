@@ -39,6 +39,7 @@ docs/CAMPAIGNS.md
 docs/CHECKED_PROPAGATION_DESIGN.md
 docs/COLUMN_TRANSPORT.md
 docs/COMPACT_LF.md
+docs/COORDINATE_DOMAINS.md
 docs/DEGENERATE_SUBSPACES.md
 docs/DFPT_CHUNKS.md
 docs/DIFFERENTIABLE_DYNAMICS.md
@@ -75,6 +76,7 @@ examples/aggregate.py
 examples/ao_recorded_path.py
 examples/campaign.py
 examples/differentiable_dynamics.py
+examples/guarded_dynamics.py
 examples/holstein_peierls.py
 examples/linear_epc.py
 examples/local_label_shards.py
@@ -119,6 +121,7 @@ src/pyeph/core/_configuration.py
 src/pyeph/core/contracts.py
 src/pyeph/core/coordinates.py
 src/pyeph/core/description.py
+src/pyeph/core/geometry.py
 src/pyeph/core/problem.py
 src/pyeph/core/state.py
 src/pyeph/core/system.py
@@ -170,6 +173,7 @@ src/pyeph/io/provenance.py
 src/pyeph/learning/__init__.py
 src/pyeph/learning/bundles.py
 src/pyeph/learning/domain.py
+src/pyeph/learning/ingestion.py
 src/pyeph/learning/labels.py
 src/pyeph/learning/reports.py
 src/pyeph/models/__init__.py
@@ -303,11 +307,14 @@ tests/test_fourier_epc.py
 tests/test_fragment.py
 tests/test_fragment_mashrm.py
 tests/test_fragment_workflow.py
+tests/test_geometry_guard.py
+tests/test_geometry_guard_adversarial.py
 tests/test_holstein_peierls_example.py
 tests/test_io_initialization.py
 tests/test_krylov.py
 tests/test_lanczos_prototype.py
 tests/test_learning_domain.py
+tests/test_learning_ingestion.py
 tests/test_learning_lifecycle.py
 tests/test_local_derivatives.py
 tests/test_local_invariants.py

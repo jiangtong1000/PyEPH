@@ -64,8 +64,23 @@ class Problem:
     nuclear_treatment: Any
     method: DynamicsMethod
     measurement: Any = None
+    geometry_guard: Any = None
 
     def validate(self):
+        if self.geometry_guard is not None:
+            from pyeph.core.geometry import CoordinateBox
+            from pyeph.dynamics.cpa import CPA
+            from pyeph.dynamics.ehrenfest import Ehrenfest
+            from pyeph.observables.population import ElectronicPopulation
+
+            if type(self.geometry_guard) is not CoordinateBox:
+                raise TypeError("geometry_guard must be a CoordinateBox")
+            if type(self.method) not in (CPA, Ehrenfest) or not self.model.spec.native_jax:
+                raise ValueError("coordinate guards support native scalar checked CPA/Ehrenfest only")
+            if self.measurement is not None and type(self.measurement) is not ElectronicPopulation:
+                raise ValueError("coordinate guards currently support only ElectronicPopulation")
+            if self.geometry_guard.shape != self.model.spec.system.q_shape:
+                raise ValueError("coordinate guard and model coordinate shapes differ")
         spec = self.model.spec
         if spec.basis_kind != "fixed_orthonormal":
             raise ValueError("native geometry dynamics requires a fixed orthonormal effective basis")
