@@ -1,5 +1,19 @@
 # Changes
 
+## 0.1.0.dev4 (unreleased)
+
+- Add an opt-in scalar campaign continuation profile. Accepted state and
+  observations share a checkpoint generation; claim-fenced ledger commits
+  identify durable progress and prevent repeated output after recovery.
+- Keep provider, preparation, execution and coordinate-domain identity fixed
+  across continuation. Graph rebuilding and model migration remain separate.
+
+This candidate has its own complete current/minimum macOS CPU qualification,
+selected optional-Torch checks and installed molecular/periodic continuation
+examples. See [qualification scope](docs/QUALIFICATION.md) for artifact
+identities, warnings and remaining platform coverage. Shared-storage operation
+and automatic neighbor rebuilding remain outside this continuation profile.
+
 ## 0.1.0.dev3 (unreleased)
 
 - Add an explicit coordinate-domain boundary to scalar checked CPA/Ehrenfest

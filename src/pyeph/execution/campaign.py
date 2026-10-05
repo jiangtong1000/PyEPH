@@ -139,12 +139,22 @@ class Campaign:
 
     @classmethod
     def create(cls, path, simulation, trajectory_ids, steps, *, preparation_id,
-               shard_size=32, initial_time=0., initial_step=0, time_dtype=None, artifact_ids=None):
+               shard_size=32, initial_time=0., initial_step=0, time_dtype=None, artifact_ids=None,
+               continuation_steps=None, provider_bundle_id=None):
         ids = partition_ids(trajectory_ids, 0, 1)
         _integer(steps, "steps", 0)
         _integer(shard_size, "shard_size", 1)
         _text(preparation_id, "preparation_id")
         _integer(initial_step, "initial_step", 0)
+        continuation = None
+        if continuation_steps is not None:
+            from pyeph.execution import _continuation
+            if shard_size != 1:
+                raise ValueError("scalar continuation requires shard_size=1")
+            continuation = _continuation.profile(simulation, continuation_steps, provider_bundle_id)
+            continuation["dt"] = simulation.integrator.dt
+        elif provider_bundle_id is not None:
+            raise ValueError("provider_bundle_id requires scalar continuation")
         if (np.ndim(initial_time) != 0 or np.iscomplexobj(initial_time)
                 or not np.isfinite(initial_time)):
             raise ValueError("initial_time must be finite and real")
@@ -163,6 +173,8 @@ class Campaign:
             raise ValueError("time_dtype must be float32 or float64")
         if dtype.itemsize == 8 and not use_x64:
             raise ValueError("float64 campaign times require JAX x64")
+        if continuation is not None and dtype != np.dtype("float64"):
+            raise ValueError("scalar continuation requires float64 time precision")
         initial_time = float(np.asarray(initial_time, dtype=dtype))
         output_times = np.asarray(initial_time + offsets * simulation.integrator.dt, dtype=dtype)
         if not np.isfinite(output_times).all() or np.any(np.diff(output_times) <= 0):
@@ -173,10 +185,15 @@ class Campaign:
                          "initial_step": initial_step, "output_times": output_times.tolist(),
                          "time_dtype": dtype.name,
                          "trajectory_ids": ids.tolist(), "shard_size": shard_size}
+        if continuation is not None:
+            specification.update(schema=2, continuation=continuation)
         specification["campaign_id"] = hashlib.sha256(_json(specification).encode()).hexdigest()
         path = Path(path).resolve()
         path.mkdir(parents=True, exist_ok=False)
         (path / "results").mkdir()
+        if continuation is not None:
+            (path / "segments").mkdir()
+            (path / "failures").mkdir()
         with closing(sqlite3.connect(path / "ledger.sqlite")) as connection, connection:
             connection.execute("PRAGMA synchronous=EXTRA")
             connection.executescript("""
@@ -193,6 +210,15 @@ class Campaign:
             connection.execute("INSERT INTO specification VALUES (?)", (_json(specification),))
             connection.executemany("INSERT INTO shards (id,status) VALUES (?, 'pending')",
                                    [(i,) for i in range((len(ids) + shard_size - 1) // shard_size)])
+            if continuation is not None:
+                connection.execute("CREATE INDEX attempts_by_shard ON attempts (shard_id)")
+                connection.execute("""CREATE TABLE segments (
+                    shard_id INTEGER NOT NULL, generation INTEGER NOT NULL,
+                    token TEXT NOT NULL, parent_sha256 TEXT,
+                    payload_file TEXT NOT NULL, payload_sha256 TEXT NOT NULL,
+                    start_step INTEGER NOT NULL, end_step INTEGER NOT NULL,
+                    first_output_index INTEGER NOT NULL, next_output_index INTEGER NOT NULL,
+                    PRIMARY KEY (shard_id, generation))""")
         _sync_directory(path)
         _sync_directory(path.parent)
         return cls(path)
@@ -207,7 +233,9 @@ class Campaign:
         expected = {"schema", "simulation_manifest", "preparation_id", "steps", "save_every",
                     "trajectory_ids", "shard_size", "campaign_id", "initial_time",
                     "initial_step", "output_times", "time_dtype"}
-        if set(document) != expected or document["schema"] != 1:
+        if document.get("schema") == 2:
+            expected.add("continuation")
+        if set(document) != expected or document["schema"] not in (1, 2):
             raise ValueError("unsupported campaign specification")
         digest = hashlib.sha256(_json({key: value for key, value in document.items()
                                      if key != "campaign_id"}).encode()).hexdigest()
@@ -227,6 +255,33 @@ class Campaign:
                 or np.any(np.diff(times) <= 0)):
             raise ValueError("invalid campaign output time grid")
         self._document = document
+        if document["schema"] == 2:
+            from pyeph.execution import _continuation
+            declaration = document["continuation"]
+            if (set(declaration) != {"profile", "steps", "provider_bundle_id", "execution",
+                                     "q_shape", "nstates", "dt"}
+                    or declaration["profile"] != _continuation.PROFILE
+                    or document["shard_size"] != 1 or document["time_dtype"] != "float64"):
+                raise ValueError("invalid scalar continuation declaration")
+            _integer(declaration["steps"], "continuation_steps", 1)
+            _integer(declaration["nstates"], "nstates", 1)
+            if (not isinstance(declaration["q_shape"], list) or not declaration["q_shape"]
+                    or any(type(x) is not int or x < 1 for x in declaration["q_shape"])
+                    or type(declaration["dt"]) not in (float, int)
+                    or not np.isfinite(declaration["dt"]) or declaration["dt"] <= 0):
+                raise ValueError("invalid continuation dimensions or time step")
+            if declaration["provider_bundle_id"] is not None:
+                _text(declaration["provider_bundle_id"], "provider_bundle_id")
+            from dataclasses import asdict
+            from pyeph.execution.runner import Execution
+            if asdict(Execution(**declaration["execution"])) != declaration["execution"]:
+                raise ValueError("invalid continuation execution policy")
+            if declaration["execution"]["save_every"] != document["save_every"]:
+                raise ValueError("continuation sampling policy mismatch")
+            expected_times = (document["initial_time"] +
+                (_continuation.grid(document)-document["initial_step"]) * declaration["dt"])
+            if not np.array_equal(times, expected_times):
+                raise ValueError("continuation declaration disagrees with integer output schedule")
         self.ledger()
 
     @property
@@ -336,6 +391,8 @@ class Campaign:
         completed ledger entry. Recovery can rerun the unit safely.
         """
         result = self._check_result(result, claim.trajectory_ids)
+        if self._document["schema"] == 2:
+            self._check_continuation_result(claim.shard_id, result)
         with self._connection() as connection:
             self._check_claim(connection, claim)
         result_dir = self.path / "results"
@@ -404,6 +461,8 @@ class Campaign:
         caught calculation error marks the unit failed and re-raises the original
         exception (including its retained state); a hard crash stays running.
         """
+        if self._document["schema"] == 2:
+            raise ValueError("scalar continuation campaigns require run_next_scalar")
         manifest = problem_manifest(simulation.problem, simulation.integrator,
                                     artifact_ids=artifact_ids)
         assert_matching_manifest(self._document["simulation_manifest"], manifest)
@@ -435,6 +494,187 @@ class Campaign:
                 self.fail(claim, f"{type(error).__name__}: {error}")
             except ClaimLostError:
                 pass  # Preserve the original error if explicit recovery fenced us.
+            except Exception as persistence_error:
+                error.add_note(f"Campaign failure record could not be saved: {persistence_error!r}")
+            raise
+        return claim
+
+    def segments(self, shard_id):
+        """Read committed scalar progress; unreferenced files are not progress."""
+        if self._document["schema"] != 2:
+            raise ValueError("campaign has no scalar continuation profile")
+        _integer(shard_id, "shard_id", 0)
+        if shard_id >= len(self._document["trajectory_ids"]):
+            raise ValueError("unknown continuation work unit")
+        with self._connection() as connection:
+            return [dict(row) for row in connection.execute(
+                "SELECT * FROM segments WHERE shard_id=? ORDER BY generation", (shard_id,))]
+
+    def _check_scalar_simulation(self, simulation, preparation_id, artifact_ids, bundle_id):
+        from pyeph.execution import _continuation
+        if self._document["schema"] != 2:
+            raise ValueError("run_next_scalar requires a continuation campaign")
+        expected = self._document["continuation"]
+        actual = _continuation.profile(simulation, expected["steps"], bundle_id)
+        actual["dt"] = simulation.integrator.dt
+        if actual != expected or preparation_id != self._document["preparation_id"]:
+            raise ValueError("continuation execution, provider bundle or preparation mismatch")
+        manifest = problem_manifest(simulation.problem, simulation.integrator, artifact_ids=artifact_ids)
+        assert_matching_manifest(self._document["simulation_manifest"], manifest)
+
+    def _read_segments(self, shard_id, *, collect=False):
+        """Verify the entire committed chain before exposing any restart state."""
+        from pyeph.execution import _continuation
+        from pyeph.io.checkpoint import array_fingerprint
+        rows = self.segments(shard_id)
+        with self._connection() as connection:
+            attempts = {row["token"]: dict(row) for row in connection.execute(
+                "SELECT token,shard_id FROM attempts WHERE shard_id=?", (shard_id,))}
+        previous, state, first_state, pieces = None, None, None, []
+        identity = self._ids(shard_id)[0]
+        for row in rows:
+            for name, size in (("token", 32), ("payload_sha256", 64)):
+                value = row[name]
+                if (not isinstance(value, str) or len(value) != size
+                        or any(character not in "0123456789abcdef" for character in value)):
+                    raise ValueError("invalid continuation token or checksum")
+            generation, start, end, first, stop = _continuation.bounds(self._document, previous)
+            filename = f"{shard_id:08d}-{generation:08d}-{row['token']}.h5"
+            if (row["generation"] != generation or row["start_step"] != start
+                    or row["end_step"] != end or row["first_output_index"] != first
+                    or row["next_output_index"] != stop or row["payload_file"] != filename
+                    or row["parent_sha256"] != (None if previous is None else previous["payload_sha256"])
+                    or row["token"] not in attempts or attempts[row["token"]]["shard_id"] != shard_id):
+                raise ValueError("continuation ledger chain mismatch")
+            path = self.path / "segments" / filename
+            if path.is_symlink() or _digest(path) != row["payload_sha256"]:
+                raise ValueError("continuation payload checksum mismatch")
+            state, _, auxiliary = _continuation.read_payload(
+                path, _continuation.metadata(self._document, row, identity), row["payload_sha256"])
+            _continuation.check_state(state, self._document, identity, end)
+            _continuation.check_auxiliary(auxiliary, self._document, row)
+            if first_state is None:
+                if float(state.time) != self._document["initial_time"]:
+                    raise ValueError("continuation initial time differs from declaration")
+                first_state = state
+            elif (np.asarray(state.step).dtype != np.asarray(first_state.step).dtype
+                    or not np.array_equal(state.key, first_state.key)
+                    or array_fingerprint(state.method_state) != array_fingerprint(first_state.method_state)):
+                raise ValueError("continuation state layout or random key changed")
+            if collect:
+                pieces.append(auxiliary)
+            previous = row
+        return state, previous, first_state, pieces
+
+    def _publish_segment(self, claim, simulation, state, auxiliary, predecessor, *, artifact_ids=None):
+        from pyeph.execution import _continuation
+        from pyeph.io.checkpoint import save_checkpoint
+        self._check_scalar_simulation(simulation, self._document["preparation_id"], artifact_ids,
+                                      self._document["continuation"]["provider_bundle_id"])
+        generation, start, end, first, stop = _continuation.bounds(self._document, predecessor)
+        row = {"shard_id": claim.shard_id, "generation": generation, "token": claim.token,
+               "parent_sha256": None if predecessor is None else predecessor["payload_sha256"],
+               "start_step": start, "end_step": end, "first_output_index": first,
+               "next_output_index": stop}
+        _continuation.check_state(state, self._document, claim.trajectory_ids[0], end)
+        _continuation.check_auxiliary(auxiliary, self._document, row)
+        directory = self.path / "segments"
+        descriptor, temporary = tempfile.mkstemp(prefix=".partial-", suffix=".h5", dir=directory)
+        os.close(descriptor)
+        filename = f"{claim.shard_id:08d}-{generation:08d}-{claim.token}.h5"
+        try:
+            save_checkpoint(temporary, state, metadata=_continuation.metadata(
+                self._document, row, claim.trajectory_ids[0]), auxiliary=auxiliary)
+            row.update(payload_file=filename, payload_sha256=_digest(temporary))
+            with self._connection(transaction=True) as connection:
+                self._check_claim(connection, claim)
+                latest = connection.execute("SELECT * FROM segments WHERE shard_id=? "
+                    "ORDER BY generation DESC LIMIT 1", (claim.shard_id,)).fetchone()
+                if (None if latest is None else dict(latest)) != predecessor:
+                    raise ClaimLostError("continuation predecessor changed before publication")
+                os.replace(temporary, directory / filename)
+                _sync_directory(directory)
+                columns = tuple(row)
+                connection.execute(f"INSERT INTO segments ({','.join(columns)}) "
+                    f"VALUES ({','.join('?' for _ in columns)})", tuple(row.values()))
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+        return row
+
+    def _check_continuation_result(self, shard_id, result):
+        from pyeph.execution import _continuation
+        _, previous, _, pieces = self._read_segments(shard_id, collect=True)
+        if (previous is None or previous["end_step"] != self._document["initial_step"] + self._document["steps"]
+                or previous["next_output_index"] != len(self._document["output_times"])):
+            raise ValueError("continuation has not committed its full trajectory")
+        expected = _continuation.assemble(self._document, self._ids(shard_id)[0], pieces)
+        for name in ("mean", "m2"):
+            actual, wanted = getattr(result, name), getattr(expected, name)
+            if (type(actual) is not dict or set(actual) != set(wanted)
+                    or any(np.asarray(actual[key]).dtype != np.dtype("float64")
+                           or np.shape(actual[key]) != np.shape(wanted[key])
+                           or not np.array_equal(actual[key], wanted[key]) for key in wanted)):
+                raise ValueError("final result disagrees with committed continuation output")
+
+    def run_next_scalar(self, simulation, initialize_one, *, preparation_id,
+                        worker_id=None, artifact_ids=None, provider_bundle_id=None):
+        """Resume one fixed scalar trajectory, committing state and output together.
+
+        Initializers receive one integer ID. Only a complete successful segment
+        advances progress; scientific failures remain failed until explicit retry.
+        Interrupted claims require explicit recovery after worker termination.
+        """
+        from pyeph.execution import _continuation, _validation
+        from pyeph.io.checkpoint import save_checkpoint
+        self._check_scalar_simulation(simulation, preparation_id, artifact_ids, provider_bundle_id)
+        claim = self.claim(worker_id=worker_id)
+        if claim is None:
+            return None
+        committed = None
+        try:
+            state, previous, original, _ = self._read_segments(claim.shard_id)
+            if state is None:
+                state = initialize_one(claim.trajectory_ids[0])
+                _continuation.check_state(state, self._document, claim.trajectory_ids[0],
+                                          self._document["initial_step"])
+                if float(state.time) != self._document["initial_time"]:
+                    raise ValueError("initializer time differs from the continuation declaration")
+                original = state
+            self._check_scalar_simulation(simulation, preparation_id, artifact_ids, provider_bundle_id)
+            _validation.validate_run_span(simulation.problem.nuclear_treatment,
+                                          simulation.integrator, original, self._document["steps"])
+            simulation._validate_state(state)
+            committed = state if previous is not None else None
+            terminal = self._document["initial_step"] + self._document["steps"]
+            while previous is None or int(state.step) < terminal:
+                count = (0 if previous is None else min(
+                    self._document["continuation"]["steps"], terminal-int(state.step)))
+                result = simulation.run(state, count)
+                auxiliary = _continuation.select_output(result, self._document, previous)
+                previous = self._publish_segment(claim, simulation, result.final_state,
+                                                 auxiliary, previous, artifact_ids=artifact_ids)
+                state = committed = result.final_state
+            self._check_scalar_simulation(simulation, preparation_id, artifact_ids, provider_bundle_id)
+            _, _, _, pieces = self._read_segments(claim.shard_id, collect=True)
+            self.complete(claim, _continuation.assemble(self._document, claim.trajectory_ids[0], pieces))
+        except BaseException as error:
+            if committed is not None and hasattr(error, "last_valid_state"):
+                try:
+                    path = self.path / "failures" / f"{claim.shard_id:08d}-{claim.token}.h5"
+                    save_checkpoint(path, committed, metadata={"campaign_id": claim.campaign_id,
+                        "shard_id": claim.shard_id, "token": claim.token,
+                        "error_type": type(error).__name__, "error": str(error)}, auxiliary={
+                        "last_valid_state": _continuation.diagnostic_tree(error.last_valid_state),
+                        "failed_state": _continuation.diagnostic_tree(error.failed_state),
+                        "diagnostics": _continuation.diagnostic_tree(error.diagnostics)})
+                    _sync_directory(path.parent)
+                except Exception as persistence_error:
+                    error.add_note(f"Continuation diagnostics could not be saved: {persistence_error!r}")
+            try:
+                self.fail(claim, f"{type(error).__name__}: {error}")
+            except ClaimLostError:
+                pass
             except Exception as persistence_error:
                 error.add_note(f"Campaign failure record could not be saved: {persistence_error!r}")
             raise
@@ -474,6 +714,8 @@ class Campaign:
                                         self._document["simulation_manifest"],
                                         self._document["preparation_id"])
             result = self._check_result(result, self._ids(row["id"]))
+            if self._document["schema"] == 2:
+                self._check_continuation_result(row["id"], result)
             merged = result if merged is None else merge_ensembles(merged, result)
         if merged is None:
             raise ValueError("campaign has no completed results")

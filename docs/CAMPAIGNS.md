@@ -45,8 +45,9 @@ A lower-precision result cannot broaden the grid acceptance tolerance. Accepted
 accumulation roundoff is mapped to the exact declared time grid when saved, so
 independently valid shards remain mergeable. Unresolvable adjacent output times
 are rejected during creation.
-A campaign reruns interrupted work units from their declared preparation, not
-from an arbitrary unverified intermediate state.
+The default campaign reruns interrupted work units from their declared
+preparation. The opt-in scalar continuation profile below resumes verified,
+committed segments.
 
 Each process opens the directory and runs any number of work units:
 
@@ -121,6 +122,60 @@ make a consistent backup only while workers are stopped.
 
 ## Resource and scientific scope
 
+### Scalar continuation within a work unit
+
+Pass `continuation_steps=N` and `shard_size=1` to `Campaign.create` to select
+the versioned scalar continuation profile. Existing campaigns keep their
+original schema and behavior. This profile requires native checked CPA or
+Ehrenfest, float64 coordinates/time, one complex128 electronic vector, and the
+exact built-in `ElectronicPopulation`. An optional `CoordinateBox` remains
+fixed. The worker accepts an initializer for one integer trajectory ID:
+
+```python
+campaign = Campaign.create(
+    "outputs/scalar_campaign", simulation, trajectory_ids=[17], steps=20000,
+    preparation_id=preparation_id, shard_size=1, continuation_steps=128,
+)
+campaign.run_next_scalar(simulation, initialize_one, preparation_id=preparation_id)
+print(campaign.segments(0))
+```
+
+The [runnable molecular/periodic example](../examples/campaign_continuation.py)
+also shows caller-owned identities for external reference-model code. Optional
+`provider_bundle_id` binds an application-owned bundle identity alongside the
+existing complete simulation manifest; it does not reconstruct a provider or
+replace the required opaque-object `artifact_ids`.
+
+Each generation contains all physical state fields and that segment's retained
+observations in one checksummed HDF5 checkpoint. The file and directory are
+synced before a fenced SQLite commit makes the generation visible. Recovery
+uses only ledger-referenced generations, verifies the entire chain, and rejects
+inconsistent metadata, payloads or output cursors. Unreferenced files are not
+inferred to be progress. Earlier producer tokens remain part of the history.
+
+The global observation schedule uses integer steps. Repeated segment starts and
+unscheduled local endpoints are omitted; segment count never becomes ensemble
+sample count. Segmentation and execution policy are frozen because restarting
+`Runner.run` can change floating-point time accumulation. Strict time-grid
+checks remain in force; this is not a bitwise equivalence promise to a run
+with a different segmentation.
+
+A numerical or domain failure commits none of its current segment. The latest
+durable generation can precede `SimulationError.last_valid_state`, which may
+describe a later, unpublished internal chunk. Original exceptions and attempt
+errors remain available. Detailed failure checkpoints are written when a
+committed generation exists; a failure before generation zero has no durable
+trajectory state. Explicit retry/recovery preserves committed
+segments; it does not widen bounds or change the physical model.
+
+The retained trajectory state and newly accumulated observations are bounded by
+one segment. The immutable campaign schedule, finalization and the existing
+ensemble merge still scale with the complete sampled time grid and its moments.
+Network filesystem qualification, neighbor rebuilding, model replacement,
+custom estimators and batched scalar continuation are outside this profile.
+
+### Default ensemble resource use
+
 Worker memory is one execution batch and the work unit's mean/M2 arrays on the
 sampled time grid. Merge memory is accumulated moments plus one result shard;
 it does not load all trajectory time series. Metadata and result-disk size grow
@@ -132,8 +187,9 @@ failures can increase disk use.
 The result remains an unweighted average over independent trajectories.
 Standard errors are trajectory sampling errors, not independent-time-origin
 errors, model uncertainty or a convergence certificate. This coordinator does
-not broaden any dynamics method's physical domain. It does not resume within a
-partially computed work unit or distribute a Hamiltonian over workers.
+not broaden any dynamics method's physical domain. The default ensemble profile
+does not resume within a partially computed work unit. Neither profile
+distributes a Hamiltonian over workers.
 
 The executable [campaign example](../examples/campaign.py) uses a parameterized
 spin-boson Hamiltonian in a fixed orthonormal two-state basis with atomic units,

@@ -2,6 +2,43 @@
 
 This is a development release with bounded scientific and platform scope.
 
+The `0.1.0.dev4` candidate adds fixed-provider scalar campaign continuation. Its
+own installed macOS CPU qualification passed against one audited wheel and
+source archive:
+
+| Dependency profile | Selection | Result |
+| --- | --- | --- |
+| Current, Python 3.13 / JAX 0.11.2 | Complete released suite | 2120 passed, 8 skipped, 4 expected failures; no warnings |
+| Minimum, Python 3.11 / JAX 0.6.2 | Complete released suite | 2120 passed, 8 skipped, 4 expected failures; 351 warnings retained |
+| Optional Torch, Python 3.12 | Selected adapter and shared-integration checks | 120 passed; no warnings |
+
+Both complete runs selected every collected test, with no deselections. The
+eight skips require optional Torch; the four expected failures preserve the
+documented archival golden-data discrepancies described below. Minimum-stack
+warnings remain visible; passing tests do not establish a blanket explanation
+for their backend cause.
+
+The tested wheel SHA256 is
+`da62e41ee0fd2d9fcbff0e437069ba6153440b8130e0f3058eeb96b6bf5e3743`
+and source-archive SHA256 is
+`c0283ab6ba2a717cf31f14cb93075341d5ef2a74dc69b1e627fe06d6a6827506`.
+The archive contains 392 explicitly inventoried files. All 144 installed
+runtime files and 248 copied support files remained unchanged. Fresh package
+environments reused existing numerical dependencies; these are not fresh
+dependency-resolution runs.
+
+Continuation checks cover actual process crashes, concurrent workers,
+same-segmentation restart agreement, independently computed ensemble moments,
+corrupt artifacts, identity changes and numerical/domain rejection. Four
+installed CLI cases cover molecular and periodic examples with CPA and
+Ehrenfest, including identical completed results after reopening. These
+parameterized examples do not establish material-model accuracy.
+
+Later reporting-only Markdown edits are separate from that tested archive;
+runtime, tests and executable support remain unchanged. These receipts do not
+qualify dev4 on Linux, accelerators or shared network storage. The historical
+dev3 and dev2 evidence below applies only to its recorded sources and artifacts.
+
 The `0.1.0.dev3` candidate adds coordinate-domain stage checks and conversion
 provenance. Its own installed macOS CPU qualification is summarized here:
 
@@ -30,9 +67,18 @@ examples also passed against that installed wheel on both CPU dependency stacks.
 The local-label candidates are illustrative and unfitted.
 
 Later qualification-report edits are separate from that tested source archive;
-runtime, tests and executable support sources remain unchanged. These results
-do not qualify dev3 on Linux or accelerators. The historical dev2 platform
-results below apply to their own artifacts.
+runtime, tests and executable support sources remain unchanged.
+
+The published dev3 commit `ac8a98df30ae16dda193556bd205b4a57dc1f676`
+subsequently passed its [Linux CI matrix](https://github.com/jiangtong1000/PyEPH/actions/runs/37252893103).
+Each of the three installed CPU jobs passed 2078 tests, with eight optional-Torch
+skips, four documented archival expected failures and no deselected tests.
+The Python 3.11 minimum stack retained 57 JAX complex-cast warnings; the Python
+3.12 and 3.13 current stacks reported none. Downloaded artifacts and qualification
+receipts match the commit's 389 source files and 143 runtime files. The separate
+optional-Torch CI job also succeeded. These dev3 results do not qualify changed
+dev4 sources or accelerators. The historical dev2 platform results below apply
+to their own artifacts.
 
 Independent numerical checks, installed-package checks and material validation
 answer different questions. The results below identify the snapshot actually

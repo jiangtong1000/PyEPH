@@ -1,6 +1,6 @@
 """Electron–nuclear dynamics with explicit physical contracts."""
 
-__version__ = "0.1.0.dev3"
+__version__ = "0.1.0.dev4"
 
 from pyeph.core.problem import CoupledClassical, PrescribedPath, Problem
 from pyeph.core.state import TrajectoryState, make_state, stack_states

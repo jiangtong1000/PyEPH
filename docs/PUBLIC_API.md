@@ -19,6 +19,7 @@ implementation details.
 | Restart | `Simulation.save_checkpoint`, `Simulation.load_checkpoint` |
 | Ensembles | `run_ensemble`, `partition_ids`, `merge_ensembles` |
 | Durable work units | `execution.campaign.Campaign` |
+| Scalar segment continuation | `Campaign.create(..., continuation_steps=N)`, `run_next_scalar` |
 | Smooth sensitivities | `execution.differentiable.DifferentiableRollout` |
 | Label ingestion | `learning.import_labels`, `learning.load_labels` |
 | Nonlinear preparation | `workflows.canonical_metropolis.NativeCanonicalMetropolis` |

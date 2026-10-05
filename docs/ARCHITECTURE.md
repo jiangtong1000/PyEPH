@@ -105,6 +105,7 @@ src/pyeph/
 │   └── mashrm_transport.py   single-origin RM correlations and continuation
 ├── execution/
 │   ├── campaign.py           persistent work-unit claims, recovery and result shards
+│   ├── _continuation.py      private scalar-segment identity and output validation
 │   ├── differentiable.py     pure smooth rollouts with separate host preflight
 │   ├── runner.py             public execution policy, block cache and output publication
 │   ├── _blocks.py            compiled ordinary/checked scans and observation buffers

@@ -65,6 +65,10 @@ accepted by strict loading. Retain the original checkpoint and make any
 scientifically justified transition explicit. The runner does not enlarge the
 domain or change the time step automatically.
 
+The opt-in [scalar campaign continuation](CAMPAIGNS.md) preserves accepted
+segments under that same fixed domain. Its durable restart point may precede
+the runner's last internally accepted chunk; recovery does not enlarge bounds.
+
 Run the [analytic replay example](../examples/guarded_dynamics.py) with
 `JAX_ENABLE_X64=1 python examples/guarded_dynamics.py`. It demonstrates rejection,
 byte-exact chunk rollback, and an explicit calculation with wider bounds on a

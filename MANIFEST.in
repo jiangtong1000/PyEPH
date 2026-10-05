@@ -74,6 +74,7 @@ include examples/abinitio_epc.py
 include examples/aggregate.py
 include examples/ao_recorded_path.py
 include examples/campaign.py
+include examples/campaign_continuation.py
 include examples/differentiable_dynamics.py
 include examples/guarded_dynamics.py
 include examples/holstein_peierls.py
@@ -137,6 +138,7 @@ include src/pyeph/dynamics/mashrm_mapping.py
 include src/pyeph/dynamics/recorded.py
 include src/pyeph/execution/__init__.py
 include src/pyeph/execution/_blocks.py
+include src/pyeph/execution/_continuation.py
 include src/pyeph/execution/_validation.py
 include src/pyeph/execution/campaign.py
 include src/pyeph/execution/differentiable.py
@@ -281,6 +283,7 @@ include tests/test_ao_frames.py
 include tests/test_ao_frames_invariants.py
 include tests/test_bracketed_events.py
 include tests/test_campaign.py
+include tests/test_campaign_continuation.py
 include tests/test_canonical_metropolis.py
 include tests/test_cartesian_epc.py
 include tests/test_checked_methods.py

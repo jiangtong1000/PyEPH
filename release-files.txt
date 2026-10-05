@@ -1,4 +1,3 @@
-# Explicit files permitted in a public source tree or distribution.
 .github/workflows/tests.yml
 .gitignore
 AGENTS.md
@@ -75,6 +74,7 @@ examples/abinitio_epc.py
 examples/aggregate.py
 examples/ao_recorded_path.py
 examples/campaign.py
+examples/campaign_continuation.py
 examples/differentiable_dynamics.py
 examples/guarded_dynamics.py
 examples/holstein_peierls.py
@@ -138,6 +138,7 @@ src/pyeph/dynamics/mashrm_mapping.py
 src/pyeph/dynamics/recorded.py
 src/pyeph/execution/__init__.py
 src/pyeph/execution/_blocks.py
+src/pyeph/execution/_continuation.py
 src/pyeph/execution/_validation.py
 src/pyeph/execution/campaign.py
 src/pyeph/execution/differentiable.py
@@ -282,6 +283,7 @@ tests/test_ao_frames.py
 tests/test_ao_frames_invariants.py
 tests/test_bracketed_events.py
 tests/test_campaign.py
+tests/test_campaign_continuation.py
 tests/test_canonical_metropolis.py
 tests/test_cartesian_epc.py
 tests/test_checked_methods.py
